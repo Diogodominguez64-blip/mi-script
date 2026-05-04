@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════╗
--- ║   DIOGO SCRIPT v4  |  MM2 Edition           ║
+-- ║   DIOGO SCRIPT v5  |  MM2 Edition           ║
 -- ║   Key: Diogo1234                            ║
 -- ╚══════════════════════════════════════════════╝
 
@@ -28,98 +28,81 @@ local C = {
     text    = Color3.fromRGB(228, 228, 245),
     textDim = Color3.fromRGB(110, 115, 155),
     line    = Color3.fromRGB(26,  26,  50),
-    -- MM2 roles
-    sheriff  = Color3.fromRGB(50,  180, 255),  -- azul sheriff
-    murder   = Color3.fromRGB(255, 50,  70),   -- rojo murderer
-    innocent = Color3.fromRGB(80,  255, 140),  -- verde inocente
-    gunFloor = Color3.fromRGB(255, 220, 50),   -- amarillo arma suelo
+    sheriff  = Color3.fromRGB(50,  180, 255),
+    murder   = Color3.fromRGB(255, 50,  70),
+    innocent = Color3.fromRGB(80,  255, 140),
+    gunFloor = Color3.fromRGB(255, 220, 50),
 }
 
 -- ═══════════════════════════════════════════
---  MM2 — detección de roles
---  MM2 guarda el rol en una StringValue/IntValue
---  dentro del personaje o en leaderstats.
---  Comprobamos además las herramientas del char.
+--  DETECCION DE ROLES MM2
 -- ═══════════════════════════════════════════
 local function getRole(player)
-    -- 1) Revisar herramientas en el personaje/backpack
-    local char    = player.Character
-    local bp      = player:FindFirstChildOfClass("Backpack")
+    local char = player.Character
+    local bp   = player:FindFirstChildOfClass("Backpack")
 
     local function hasTool(name)
+        local nl = name:lower()
         if char then
-            for _, t in pairs(char:GetChildren()) do
-                if t:IsA("Tool") and string.find(t.Name:lower(), name:lower()) then
-                    return true
-                end
+            for _, t in ipairs(char:GetChildren()) do
+                if t:IsA("Tool") and t.Name:lower():find(nl) then return true end
             end
         end
         if bp then
-            for _, t in pairs(bp:GetChildren()) do
-                if t:IsA("Tool") and string.find(t.Name:lower(), name:lower()) then
-                    return true
-                end
+            for _, t in ipairs(bp:GetChildren()) do
+                if t:IsA("Tool") and t.Name:lower():find(nl) then return true end
             end
         end
         return false
     end
 
-    -- Murderer lleva cuchillo
-    if hasTool("Knife") or hasTool("knife") then
-        return "murder"
-    end
-
-    -- Sheriff lleva revolver
+    if hasTool("Knife")   then return "murder"  end
     if hasTool("Revolver") or hasTool("Sheriff") or hasTool("Gun") or hasTool("Pistol") then
         return "sheriff"
     end
 
-    -- 2) Revisar valores de rol en el character o player
-    local function findRole(parent)
+    local function scanValues(parent)
         if not parent then return nil end
-        for _, v in pairs(parent:GetChildren()) do
+        for _, v in ipairs(parent:GetChildren()) do
             local n = v.Name:lower()
             if n == "role" or n == "team" or n == "playerrole" then
-                local val = (v:IsA("StringValue") or v:IsA("IntValue")) and v.Value
+                local val = (v:IsA("StringValue") or v:IsA("IntValue")) and tostring(v.Value):lower()
                 if val then
-                    local s = tostring(val):lower()
-                    if s == "murderer" or s == "murder" or s == "2" then return "murder" end
-                    if s == "sheriff"  or s == "1"                    then return "sheriff" end
-                    if s == "innocent" or s == "0"                    then return "innocent" end
+                    if val == "murderer" or val == "murder" or val == "2" then return "murder"  end
+                    if val == "sheriff"  or val == "1"                    then return "sheriff" end
+                    if val == "innocent" or val == "0"                    then return "innocent" end
                 end
             end
         end
         return nil
     end
 
-    local r = findRole(char) or findRole(player)
+    local r = scanValues(char) or scanValues(player)
     if r then return r end
 
-    -- 3) Revisar leaderstats (algunos juegos custom de MM2 lo guardan ahí)
     local ls = player:FindFirstChild("leaderstats")
     if ls then
         local rv = ls:FindFirstChild("Role") or ls:FindFirstChild("role")
         if rv then
             local s = tostring(rv.Value):lower()
-            if s:find("murder") then return "murder" end
+            if s:find("murder")  then return "murder"  end
             if s:find("sheriff") then return "sheriff" end
         end
     end
 
-    -- default
     return "innocent"
 end
 
 local function roleColor(role)
-    if role == "murder"   then return C.murder  end
-    if role == "sheriff"  then return C.sheriff  end
+    if role == "murder"  then return C.murder  end
+    if role == "sheriff" then return C.sheriff  end
     return C.innocent
 end
 
-local function roleIcon(role)
-    if role == "murder"  then return "🔪 MURDER"  end
-    if role == "sheriff" then return "🔫 SHERIFF" end
-    return "😐 INOCENTE"
+local function roleLabel(role)
+    if role == "murder"  then return "MURDER"  end
+    if role == "sheriff" then return "SHERIFF" end
+    return "INOCENTE"
 end
 
 -- ═══════════════════════════════════════════
@@ -142,6 +125,7 @@ local function toast(msg, color)
     f.ZIndex = 60
     f.Parent = ToastGui
     Instance.new("UICorner", f).CornerRadius = UDim.new(0, 10)
+
     local bar = Instance.new("Frame")
     bar.Size = UDim2.new(0, 4, 1, 0)
     bar.BackgroundColor3 = color
@@ -149,6 +133,7 @@ local function toast(msg, color)
     bar.ZIndex = 61
     bar.Parent = f
     Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 4)
+
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -16, 1, 0)
     lbl.Position = UDim2.new(0, 14, 0, 0)
@@ -160,11 +145,15 @@ local function toast(msg, color)
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.ZIndex = 61
     lbl.Parent = f
-    Instance.new("UIStroke", f).Color = color
+
+    local stroke = Instance.new("UIStroke", f)
+    stroke.Color = color
+
     TweenService:Create(f, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
         Position = UDim2.new(1, -282, 0, toastY)
     }):Play()
     toastY += 50
+
     task.delay(2.8, function()
         TweenService:Create(f, TweenInfo.new(0.25), {
             Position = UDim2.new(1, 20, 0, f.Position.Y.Offset),
@@ -224,7 +213,7 @@ local KTitle = Instance.new("TextLabel")
 KTitle.Size = UDim2.new(1, 0, 0, 52)
 KTitle.Position = UDim2.new(0, 0, 0, 14)
 KTitle.BackgroundTransparency = 1
-KTitle.Text = "⚡  DIOGO SCRIPT  MM2"
+KTitle.Text = "DIOGO SCRIPT  //  MM2"
 KTitle.TextColor3 = C.text
 KTitle.TextScaled = true
 KTitle.Font = Enum.Font.GothamBold
@@ -247,7 +236,7 @@ KBox.Size = UDim2.new(0.82, 0, 0, 44)
 KBox.Position = UDim2.new(0.09, 0, 0, 100)
 KBox.BackgroundColor3 = C.bg3
 KBox.TextColor3 = C.text
-KBox.PlaceholderText = "Pega tu key aquí..."
+KBox.PlaceholderText = "Pega tu key aqui..."
 KBox.PlaceholderColor3 = C.textDim
 KBox.Text = ""
 KBox.TextScaled = true
@@ -261,8 +250,8 @@ local KBStr = Instance.new("UIStroke")
 KBStr.Color = C.line
 KBStr.Thickness = 1.5
 KBStr.Parent = KBox
-KBox.Focused:Connect(function() TweenService:Create(KBStr, TweenInfo.new(0.2), {Color = C.accent}):Play() end)
-KBox.FocusLost:Connect(function()  TweenService:Create(KBStr, TweenInfo.new(0.2), {Color = C.line}):Play()   end)
+KBox.Focused:Connect(function()  TweenService:Create(KBStr, TweenInfo.new(0.2), {Color = C.accent}):Play() end)
+KBox.FocusLost:Connect(function() TweenService:Create(KBStr, TweenInfo.new(0.2), {Color = C.line}):Play()   end)
 
 local function mkKBtn(text, posX, bg, tc)
     local b = Instance.new("TextButton")
@@ -282,8 +271,8 @@ local function mkKBtn(text, posX, bg, tc)
     return b
 end
 
-local GetKeyBtn = mkKBtn("Get Key",    0.09, C.bg3,   C.accentB)
-local VerifyBtn = mkKBtn("Verificar",  0.56, C.accent, Color3.new(1,1,1))
+local GetKeyBtn = mkKBtn("Get Key",   0.09, C.bg3,   C.accentB)
+local VerifyBtn = mkKBtn("Verificar", 0.56, C.accent, Color3.new(1,1,1))
 
 local KStatus = Instance.new("TextLabel")
 KStatus.Size = UDim2.new(1, 0, 0, 28)
@@ -297,22 +286,22 @@ KStatus.Parent = KF
 
 GetKeyBtn.MouseButton1Click:Connect(function()
     KStatus.TextColor3 = C.accentB
-    KStatus.Text = "🔑  Key: Diogo1234"
+    KStatus.Text = "KEY: Diogo1234"
 end)
 
 VerifyBtn.MouseButton1Click:Connect(function()
     if KBox.Text == KEY_CORRECTA then
         KStatus.TextColor3 = C.accentG
-        KStatus.Text = "✓  Verificado! Cargando..."
+        KStatus.Text = "Verificado! Cargando..."
         TweenService:Create(KF, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
             Size = UDim2.new(0, 0, 0, 0)
         }):Play()
         task.wait(0.35)
         KeyGui:Destroy()
 
-        -- ═══════════════════════════════════════════════════════════
-        --                       MAIN SCRIPT
-        -- ═══════════════════════════════════════════════════════════
+        -- ════════════════════════════════════════════════════════════
+        --                        MAIN SCRIPT
+        -- ════════════════════════════════════════════════════════════
         local speedEnabled  = false
         local noclipEnabled = false
         local flyEnabled    = false
@@ -323,11 +312,11 @@ VerifyBtn.MouseButton1Click:Connect(function()
         local hideKey       = Enum.KeyCode.RightShift
         local uiVisible     = true
         local speedLoop, noclipLoop, flyLoop, espLoop
-        local espObjects    = {}  -- [player] = { billboard, line, ... }
+        local espObjects    = {}
 
-        -- ═══════════════════════════════════════
+        -- ════════════════════════════════════════
         --  MAIN GUI
-        -- ═══════════════════════════════════════
+        -- ════════════════════════════════════════
         local MainGui = Instance.new("ScreenGui")
         MainGui.Name = "DiogoScript"
         MainGui.ResetOnSpawn = false
@@ -358,6 +347,7 @@ VerifyBtn.MouseButton1Click:Connect(function()
         TopGrad.BorderSizePixel = 0
         TopGrad.ZIndex = 9
         TopGrad.Parent = Main
+        Instance.new("UICorner", TopGrad).CornerRadius = UDim.new(1, 0)
         Instance.new("UIGradient", TopGrad).Color = ColorSequence.new({
             ColorSequenceKeypoint.new(0,   C.accent),
             ColorSequenceKeypoint.new(0.5, C.accentB),
@@ -373,18 +363,24 @@ VerifyBtn.MouseButton1Click:Connect(function()
         Header.ZIndex = 8
         Header.Parent = Main
 
-        local HIcon = Instance.new("TextLabel")
+        local HIcon = Instance.new("Frame")
         HIcon.Size = UDim2.new(0, 30, 0, 30)
         HIcon.Position = UDim2.new(0, 14, 0.5, -15)
         HIcon.BackgroundColor3 = C.accent
-        HIcon.TextColor3 = Color3.new(1,1,1)
-        HIcon.Text = "⚡"
-        HIcon.TextScaled = true
-        HIcon.Font = Enum.Font.GothamBold
         HIcon.BorderSizePixel = 0
         HIcon.ZIndex = 9
         HIcon.Parent = Header
         Instance.new("UICorner", HIcon).CornerRadius = UDim.new(0, 7)
+
+        local HIconLabel = Instance.new("TextLabel")
+        HIconLabel.Size = UDim2.new(1, 0, 1, 0)
+        HIconLabel.BackgroundTransparency = 1
+        HIconLabel.Text = "D"
+        HIconLabel.TextColor3 = Color3.new(1,1,1)
+        HIconLabel.TextScaled = true
+        HIconLabel.Font = Enum.Font.GothamBlack
+        HIconLabel.ZIndex = 10
+        HIconLabel.Parent = HIcon
 
         local HTitle = Instance.new("TextLabel")
         HTitle.Size = UDim2.new(0, 170, 1, 0)
@@ -407,6 +403,7 @@ VerifyBtn.MouseButton1Click:Connect(function()
         HBadge.Parent = Header
         Instance.new("UICorner", HBadge).CornerRadius = UDim.new(0, 6)
         Instance.new("UIGradient", HBadge).Color = ColorSequence.new(C.accentR, Color3.fromRGB(255,100,50))
+
         local HBLbl = Instance.new("TextLabel")
         HBLbl.Size = UDim2.new(1, 0, 1, 0)
         HBLbl.BackgroundTransparency = 1
@@ -422,7 +419,7 @@ VerifyBtn.MouseButton1Click:Connect(function()
         MinBtn.Position = UDim2.new(1, -46, 0.5, -17)
         MinBtn.BackgroundColor3 = C.accentR
         MinBtn.TextColor3 = Color3.new(1,1,1)
-        MinBtn.Text = "✕"
+        MinBtn.Text = "X"
         MinBtn.TextScaled = true
         MinBtn.Font = Enum.Font.GothamBold
         MinBtn.BorderSizePixel = 0
@@ -463,18 +460,18 @@ VerifyBtn.MouseButton1Click:Connect(function()
         Content.ClipsDescendants = true
         Content.Parent = Main
 
-        -- ═══════════════════════════════════════
+        -- ════════════════════════════════════════
         --  TABS
-        -- ═══════════════════════════════════════
-        local tabs = {}
+        -- ════════════════════════════════════════
+        local tabs     = {}
         local tabPages = {}
         local activeTab = nil
 
         local tabDefs = {
-            {name = "Movement", icon = "🏃"},
-            {name = "Teleport",  icon = "🌀"},
-            {name = "ESP",       icon = "📡"},
-            {name = "Misc",      icon = "⚙"},
+            {name = "Movement", label = "Movement"},
+            {name = "Teleport",  label = "Teleport"},
+            {name = "ESP",       label = "ESP"},
+            {name = "Misc",      label = "Misc"},
         }
 
         local function switchTab(name)
@@ -502,7 +499,7 @@ VerifyBtn.MouseButton1Click:Connect(function()
             btn.BackgroundColor3 = Color3.fromRGB(22, 22, 40)
             btn.BackgroundTransparency = 1
             btn.TextColor3 = C.textDim
-            btn.Text = def.icon .. "  " .. def.name
+            btn.Text = def.label
             btn.TextScaled = true
             btn.Font = Enum.Font.GothamBold
             btn.BorderSizePixel = 0
@@ -531,7 +528,7 @@ VerifyBtn.MouseButton1Click:Connect(function()
             page.ZIndex = 4
             page.Parent = Content
 
-            tabs[def.name] = {btn = btn, ind = ind}
+            tabs[def.name]     = {btn = btn, ind = ind}
             tabPages[def.name] = page
 
             btn.MouseEnter:Connect(function()
@@ -554,9 +551,9 @@ VerifyBtn.MouseButton1Click:Connect(function()
         local miscPage = crearTab(tabDefs[4], 4)
         switchTab("Movement")
 
-        -- ═══════════════════════════════════════
+        -- ════════════════════════════════════════
         --  HELPERS UI
-        -- ═══════════════════════════════════════
+        -- ════════════════════════════════════════
         local function secTitle(parent, texto, posY)
             local f = Instance.new("Frame")
             f.Size = UDim2.new(1, -20, 0, 28)
@@ -738,22 +735,28 @@ VerifyBtn.MouseButton1Click:Connect(function()
             return btn
         end
 
-        -- ═══════════════════════════════════════
-        --  MOVEMENT
-        -- ═══════════════════════════════════════
+        -- ════════════════════════════════════════
+        --  MOVEMENT TAB
+        -- ════════════════════════════════════════
         secTitle(movPage, "Speed", 10)
         mkToggle(movPage, "Enable Speed", 46, function(on)
             speedEnabled = on
             if on then
                 speedLoop = RunService.Heartbeat:Connect(function()
                     local c = lp.Character
-                    if c then local h = c:FindFirstChildOfClass("Humanoid") if h then h.WalkSpeed = currentSpeed end end
+                    if c then
+                        local h = c:FindFirstChildOfClass("Humanoid")
+                        if h then h.WalkSpeed = currentSpeed end
+                    end
                 end)
                 toast("Speed ON: " .. currentSpeed, C.accentG)
             else
                 if speedLoop then speedLoop:Disconnect() speedLoop = nil end
                 local c = lp.Character
-                if c then local h = c:FindFirstChildOfClass("Humanoid") if h then h.WalkSpeed = 16 end end
+                if c then
+                    local h = c:FindFirstChildOfClass("Humanoid")
+                    if h then h.WalkSpeed = 16 end
+                end
                 toast("Speed OFF", C.accentR)
             end
         end)
@@ -765,7 +768,10 @@ VerifyBtn.MouseButton1Click:Connect(function()
             local c = lp.Character
             if c then
                 local h = c:FindFirstChildOfClass("Humanoid")
-                if h then h.UseJumpPower = true h.JumpPower = on and currentJump or 50 end
+                if h then
+                    h.UseJumpPower = true
+                    h.JumpPower = on and currentJump or 50
+                end
             end
             toast(on and "Jump ON" or "Jump OFF", on and C.accentG or C.accentR)
         end)
@@ -773,11 +779,14 @@ VerifyBtn.MouseButton1Click:Connect(function()
             currentJump = v
             if jumpEnabled then
                 local c = lp.Character
-                if c then local h = c:FindFirstChildOfClass("Humanoid") if h then h.UseJumpPower = true h.JumpPower = v end end
+                if c then
+                    local h = c:FindFirstChildOfClass("Humanoid")
+                    if h then h.UseJumpPower = true h.JumpPower = v end
+                end
             end
         end)
 
-        secTitle(movPage, "Fly  (W/A/S/D + Espacio/Ctrl)", 340)
+        secTitle(movPage, "Fly  (WASD + Space/LCtrl)", 340)
         mkToggle(movPage, "Enable Fly", 376, function(on)
             flyEnabled = on
             local char = lp.Character
@@ -788,9 +797,11 @@ VerifyBtn.MouseButton1Click:Connect(function()
                 local hum = char:FindFirstChildOfClass("Humanoid")
                 if hum then hum.PlatformStand = true end
                 local bv = Instance.new("BodyVelocity")
-                bv.Name = "FlyVel" bv.Velocity = Vector3.zero bv.MaxForce = Vector3.new(1e5,1e5,1e5) bv.Parent = hrp
+                bv.Name = "FlyVel" bv.Velocity = Vector3.zero
+                bv.MaxForce = Vector3.new(1e5,1e5,1e5) bv.Parent = hrp
                 local bg = Instance.new("BodyGyro")
-                bg.Name = "FlyGyro" bg.MaxTorque = Vector3.new(1e5,1e5,1e5) bg.D = 50 bg.Parent = hrp
+                bg.Name = "FlyGyro" bg.MaxTorque = Vector3.new(1e5,1e5,1e5)
+                bg.D = 50 bg.Parent = hrp
                 flyLoop = RunService.Heartbeat:Connect(function()
                     local c = lp.Character if not c then return end
                     local r = c:FindFirstChild("HumanoidRootPart") if not r then return end
@@ -798,21 +809,24 @@ VerifyBtn.MouseButton1Click:Connect(function()
                     local gyro = r:FindFirstChild("FlyGyro")
                     if not vel or not gyro then return end
                     local d = Vector3.zero
-                    if UserInputService:IsKeyDown(Enum.KeyCode.W) then d += camera.CFrame.LookVector end
-                    if UserInputService:IsKeyDown(Enum.KeyCode.S) then d -= camera.CFrame.LookVector end
+                    if UserInputService:IsKeyDown(Enum.KeyCode.W) then d += camera.CFrame.LookVector  end
+                    if UserInputService:IsKeyDown(Enum.KeyCode.S) then d -= camera.CFrame.LookVector  end
                     if UserInputService:IsKeyDown(Enum.KeyCode.A) then d -= camera.CFrame.RightVector end
                     if UserInputService:IsKeyDown(Enum.KeyCode.D) then d += camera.CFrame.RightVector end
-                    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then d += Vector3.new(0,1,0) end
+                    if UserInputService:IsKeyDown(Enum.KeyCode.Space)       then d += Vector3.new(0,1,0) end
                     if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then d -= Vector3.new(0,1,0) end
                     vel.Velocity = d.Magnitude > 0 and d.Unit * 65 or Vector3.zero
-                    gyro.CFrame = camera.CFrame
+                    gyro.CFrame  = camera.CFrame
                 end)
-                toast("Fly ON ✈", C.accentG)
+                toast("Fly ON", C.accentG)
             else
                 if flyLoop then flyLoop:Disconnect() flyLoop = nil end
-                local v = hrp:FindFirstChild("FlyVel") local g = hrp:FindFirstChild("FlyGyro")
-                if v then v:Destroy() end if g then g:Destroy() end
-                local h = char:FindFirstChildOfClass("Humanoid") if h then h.PlatformStand = false end
+                local v = hrp:FindFirstChild("FlyVel")
+                local g = hrp:FindFirstChild("FlyGyro")
+                if v then v:Destroy() end
+                if g then g:Destroy() end
+                local h = char:FindFirstChildOfClass("Humanoid")
+                if h then h.PlatformStand = false end
                 toast("Fly OFF", C.accentR)
             end
         end)
@@ -823,7 +837,11 @@ VerifyBtn.MouseButton1Click:Connect(function()
             if on then
                 noclipLoop = RunService.Stepped:Connect(function()
                     local c = lp.Character
-                    if c then for _, p in pairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = false end end end
+                    if c then
+                        for _, p in pairs(c:GetDescendants()) do
+                            if p:IsA("BasePart") then p.CanCollide = false end
+                        end
+                    end
                 end)
                 toast("Noclip ON", C.accentG)
             else
@@ -832,9 +850,9 @@ VerifyBtn.MouseButton1Click:Connect(function()
             end
         end)
 
-        -- ═══════════════════════════════════════════════════════
-        --  TELEPORT PAGE  —  MM2 enfocado
-        -- ═══════════════════════════════════════════════════════
+        -- ════════════════════════════════════════════════════════
+        --  TELEPORT TAB
+        -- ════════════════════════════════════════════════════════
         secTitle(tpPage, "Teleport a Jugadores", 10)
 
         local plrListFrame = Instance.new("Frame")
@@ -863,13 +881,13 @@ VerifyBtn.MouseButton1Click:Connect(function()
 
         local function refreshPlayers()
             for _, c in pairs(plrScroll:GetChildren()) do
-                if c:IsA("Frame") or c:IsA("TextButton") then c:Destroy() end
+                if not c:IsA("UIListLayout") then c:Destroy() end
             end
-            for _, p in pairs(Players:GetPlayers()) do
+            for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= lp then
-                    local role  = getRole(p)
-                    local col   = roleColor(role)
-                    local icon  = roleIcon(role)
+                    local role = getRole(p)
+                    local col  = roleColor(role)
+                    local icon = roleLabel(role)
 
                     local row = Instance.new("Frame")
                     row.Size = UDim2.new(1, 0, 0, 40)
@@ -903,7 +921,7 @@ VerifyBtn.MouseButton1Click:Connect(function()
                     roleLbl.Size = UDim2.new(0.38, 0, 1, 0)
                     roleLbl.Position = UDim2.new(0.58, 0, 0, 0)
                     roleLbl.BackgroundTransparency = 1
-                    roleLbl.Text = icon
+                    roleLbl.Text = "[" .. icon .. "]"
                     roleLbl.TextColor3 = col
                     roleLbl.TextScaled = true
                     roleLbl.Font = Enum.Font.Gotham
@@ -917,9 +935,8 @@ VerifyBtn.MouseButton1Click:Connect(function()
                     tpBtn.Text = ""
                     tpBtn.ZIndex = 9
                     tpBtn.Parent = row
-
                     tpBtn.MouseEnter:Connect(function()
-                        TweenService:Create(row, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(32, 32, 58)}):Play()
+                        TweenService:Create(row, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(32,32,58)}):Play()
                     end)
                     tpBtn.MouseLeave:Connect(function()
                         TweenService:Create(row, TweenInfo.new(0.15), {BackgroundColor3 = C.bg3}):Play()
@@ -932,7 +949,7 @@ VerifyBtn.MouseButton1Click:Connect(function()
                             local thrp = tc:FindFirstChild("HumanoidRootPart")
                             if mhrp and thrp then
                                 mhrp.CFrame = thrp.CFrame + Vector3.new(0, 3.5, 0)
-                                toast("TP → " .. p.Name .. "  " .. icon, col)
+                                toast("TP -> " .. p.Name .. " [" .. icon .. "]", col)
                             end
                         end
                     end)
@@ -941,20 +958,16 @@ VerifyBtn.MouseButton1Click:Connect(function()
         end
 
         refreshPlayers()
-        mkButton(tpPage, "🔄  Actualizar Lista", 252, C.accent, function()
+        mkButton(tpPage, "Actualizar Lista", 252, C.accent, function()
             refreshPlayers()
             toast("Lista actualizada", C.accentB)
         end)
-        Players.PlayerAdded:Connect(function() task.wait(1) refreshPlayers() end)
+        Players.PlayerAdded:Connect(function()   task.wait(1)   refreshPlayers() end)
         Players.PlayerRemoving:Connect(function() task.wait(0.1) refreshPlayers() end)
 
-        -- ─────────────────────────────────────────
-        --  ARMA DEL SHERIFF EN EL SUELO
-        --  En MM2 cuando el sheriff muere, el arma
-        --  se convierte en un Model/Tool suelto en
-        --  workspace. Nombres posibles: "Revolver",
-        --  "SheriffGun", "Gun", "sheriff_gun", etc.
-        -- ─────────────────────────────────────────
+        -- ──────────────────────────────────────────────
+        --  ARMA DEL SHERIFF EN SUELO
+        -- ──────────────────────────────────────────────
         secTitle(tpPage, "Arma del Sheriff (suelo)", 306)
 
         local gunStatusLbl = Instance.new("TextLabel")
@@ -971,119 +984,117 @@ VerifyBtn.MouseButton1Click:Connect(function()
         gunStatusLbl.Parent = tpPage
         Instance.new("UICorner", gunStatusLbl).CornerRadius = UDim.new(0, 8)
 
-        -- Nombres que usa MM2 para el arma del sheriff cuando está en el suelo
         local SHERIFF_GUN_NAMES = {
-            "revolver", "sheriffgun", "sheriff_gun", "sheriffweapon",
-            "gun", "pistol", "classicsheriff", "sheriff", "sherrifgun",
-            "dropped_gun", "droppedgun", "weapongun"
+            "revolver","sheriffgun","sheriff_gun","sheriffweapon",
+            "gun","pistol","classicsheriff","sheriff","sherrifgun",
+            "dropped_gun","droppedgun","weapongun"
         }
 
+        local cachedGun    = nil  -- cache para evitar scan completo cada frame
+        local gunCacheTime = 0
+        local GUN_CACHE_TTL = 0.5  -- re-escanea cada 0.5s
+
         local function findSheriffGun()
-            -- Busca en workspace objetos que NO sean personajes de jugadores
-            local function check(obj)
+            local now = tick()
+            if cachedGun and (now - gunCacheTime) < GUN_CACHE_TTL then
+                -- Verifica que el cached sigue siendo válido
+                if cachedGun.Parent then return cachedGun end
+                cachedGun = nil
+            end
+
+            local function isEquippedByPlayer(obj)
+                for _, p in ipairs(Players:GetPlayers()) do
+                    local c = p.Character
+                    if c and obj:IsDescendantOf(c) then return true end
+                end
+                return false
+            end
+
+            for _, obj in ipairs(workspace:GetDescendants()) do
                 local n = obj.Name:lower()
-                for _, name in pairs(SHERIFF_GUN_NAMES) do
-                    if n == name or string.find(n, name) then
-                        -- Verifica que no sea una tool equipada por un player
-                        local isEquipped = false
-                        for _, p in pairs(Players:GetPlayers()) do
-                            local c = p.Character
-                            if c and obj:IsDescendantOf(c) then
-                                isEquipped = true
-                                break
-                            end
-                        end
-                        if not isEquipped then
+                for _, name in ipairs(SHERIFF_GUN_NAMES) do
+                    if n == name or n:find(name, 1, true) then
+                        if not isEquippedByPlayer(obj) then
+                            cachedGun    = obj
+                            gunCacheTime = now
                             return obj
                         end
                     end
                 end
-                return nil
             end
-
-            for _, obj in pairs(workspace:GetDescendants()) do
-                local found = check(obj)
-                if found then return found end
-            end
+            cachedGun = nil
             return nil
         end
 
         local function getGunPosition(gun)
-            if gun:IsA("BasePart") then
-                return gun.Position
-            elseif gun:IsA("Model") then
-                local pp = gun.PrimaryPart or gun:FindFirstChildOfClass("BasePart")
+            if gun:IsA("BasePart") then return gun.Position end
+            if gun:IsA("Model") or gun:IsA("Tool") then
+                local pp = (gun:IsA("Model") and gun.PrimaryPart) or gun:FindFirstChildOfClass("BasePart")
                 if pp then return pp.Position end
-            elseif gun:IsA("Tool") then
-                local p = gun:FindFirstChildOfClass("BasePart")
-                if p then return p.Position end
             end
             return nil
         end
 
-        mkButton(tpPage, "⚡  TP a Arma del Sheriff", 380, C.gunFloor, function()
+        mkButton(tpPage, "TP a Arma del Sheriff", 380, C.gunFloor, function()
             local char = lp.Character
-            if not char then toast("Necesitas un personaje", C.accentR) return end
+            if not char then toast("Sin personaje", C.accentR) return end
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if not hrp then return end
-
             local gun = findSheriffGun()
             if gun then
                 local pos = getGunPosition(gun)
                 if pos then
                     hrp.CFrame = CFrame.new(pos + Vector3.new(0, 4, 0))
-                    gunStatusLbl.Text = "  ✓ Encontrada: " .. gun.Name
+                    gunStatusLbl.Text = "  OK: " .. gun.Name
                     gunStatusLbl.TextColor3 = C.accentG
-                    toast("✓ TP a arma: " .. gun.Name, C.gunFloor)
+                    toast("TP a arma: " .. gun.Name, C.gunFloor)
                 else
-                    toast("No se obtuvo posición", C.accentY)
+                    toast("Sin posicion del arma", C.accentY)
                 end
             else
-                toast("Arma no encontrada en suelo", C.accentR)
-                gunStatusLbl.Text = "  ✗ No encontrada en workspace"
+                toast("Arma no encontrada", C.accentR)
+                gunStatusLbl.Text = "  No encontrada en workspace"
                 gunStatusLbl.TextColor3 = C.accentR
             end
         end)
 
-        mkButton(tpPage, "🔍  Buscar Arma (solo info)", 432, C.accentB, function()
+        mkButton(tpPage, "Buscar Arma (solo info)", 432, C.accentB, function()
+            cachedGun = nil  -- fuerza re-scan
             local gun = findSheriffGun()
             if gun then
                 local pos = getGunPosition(gun)
                 local posStr = pos and string.format("(%.0f, %.0f, %.0f)", pos.X, pos.Y, pos.Z) or "?"
-                gunStatusLbl.Text = "  📍 " .. gun.Name .. " en " .. posStr
+                gunStatusLbl.Text = "  " .. gun.Name .. " en " .. posStr
                 gunStatusLbl.TextColor3 = C.gunFloor
                 toast("Arma hallada: " .. gun.Name, C.gunFloor)
             else
-                gunStatusLbl.Text = "  ✗ No está en el suelo aún"
+                gunStatusLbl.Text = "  No esta en el suelo aun"
                 gunStatusLbl.TextColor3 = C.textDim
-                toast("Arma no en suelo todavía", C.accentY)
+                toast("Arma no en suelo", C.accentY)
             end
         end)
 
-        -- Auto-detectar cuando el arma cae al suelo
-        local gunWatcher
+        local gunWatcher   = nil
         local gunAlertEnabled = false
 
-        local function startGunWatcher()
-            if gunWatcher then gunWatcher:Disconnect() end
-            gunWatcher = RunService.Heartbeat:Connect(function()
-                if not gunAlertEnabled then return end
-                local gun = findSheriffGun()
-                if gun then
-                    gunStatusLbl.Text = "  🟡 ARMA EN SUELO: " .. gun.Name
-                    gunStatusLbl.TextColor3 = C.gunFloor
-                else
-                    gunStatusLbl.Text = "  Estado: sin arma en suelo"
-                    gunStatusLbl.TextColor3 = C.textDim
-                end
-            end)
-        end
-
-        secTitle(tpPage, "Alerta de Arma Caída", 484)
+        secTitle(tpPage, "Alerta de Arma Caida", 484)
         mkToggle(tpPage, "Auto-detectar Arma en Suelo", 520, function(on)
             gunAlertEnabled = on
             if on then
-                startGunWatcher()
+                local lastCheck = 0
+                gunWatcher = RunService.Heartbeat:Connect(function()
+                    local now = tick()
+                    if now - lastCheck < 0.5 then return end  -- revisar cada 0.5s
+                    lastCheck = now
+                    local gun = findSheriffGun()
+                    if gun then
+                        gunStatusLbl.Text = "  ARMA EN SUELO: " .. gun.Name
+                        gunStatusLbl.TextColor3 = C.gunFloor
+                    else
+                        gunStatusLbl.Text = "  Sin arma en suelo"
+                        gunStatusLbl.TextColor3 = C.textDim
+                    end
+                end)
                 toast("Detector de arma ON", C.gunFloor)
             else
                 if gunWatcher then gunWatcher:Disconnect() gunWatcher = nil end
@@ -1091,46 +1102,58 @@ VerifyBtn.MouseButton1Click:Connect(function()
             end
         end)
 
-        -- ═══════════════════════════════════════════════════════
-        --  ESP  MM2  —  4 tipos de ESP
-        -- ═══════════════════════════════════════════════════════
-        --
-        --  1. Sheriff   → azul  🔫
-        --  2. Murder    → rojo  🔪
-        --  3. Inocente  → verde 😐
-        --  4. Arma suelo → amarillo  (BillboardGui en workspace)
-        -- ═══════════════════════════════════════════════════════
+        -- ════════════════════════════════════════════════════════
+        --  ESP MM2  -  OPTIMIZADO
+        --  - Billboards siempre activos, sin lineas (caro)
+        --  - Loop usa Heartbeat throttled a ~20fps
+        --  - getRole se cachea por jugador con TTL de 0.4s
+        --  - findSheriffGun usa cache propio
+        --  - Sin pcall en el hot-path
+        -- ════════════════════════════════════════════════════════
 
         local espEnabledSheriff  = true
         local espEnabledMurder   = true
         local espEnabledInnocent = true
         local espEnabledGunFloor = true
-        local gunFloorBillboard  = nil  -- billboard para el arma en suelo
+        local gunFloorBillboard  = nil
+
+        -- Cache de roles por jugador
+        local roleCache = {}
+        local ROLE_CACHE_TTL = 0.4
+
+        local function getCachedRole(player)
+            local entry = roleCache[player]
+            if entry and (tick() - entry.time) < ROLE_CACHE_TTL then
+                return entry.role
+            end
+            local r = getRole(player)
+            roleCache[player] = {role = r, time = tick()}
+            return r
+        end
 
         local function removeAllESP()
             for _, obj in pairs(espObjects) do
-                pcall(function() obj.billboard:Destroy() end)
-                pcall(function() obj.lineHolder:Destroy() end)
+                if obj.billboard and obj.billboard.Parent then obj.billboard:Destroy() end
             end
             espObjects = {}
-            if gunFloorBillboard then
-                pcall(function() gunFloorBillboard:Destroy() end)
+            if gunFloorBillboard and gunFloorBillboard.Parent then
+                gunFloorBillboard:Destroy()
                 gunFloorBillboard = nil
             end
+            roleCache = {}
         end
 
+        -- Crea el billboard de un jugador (solo una vez)
         local function createPlayerESP(player)
             if player == lp or espObjects[player] then return end
 
-            -- Billboard (nombre + rol)
             local billboard = Instance.new("BillboardGui")
-            billboard.Size = UDim2.new(0, 145, 0, 52)
+            billboard.Size = UDim2.new(0, 150, 0, 50)
             billboard.StudsOffset = Vector3.new(0, 3.5, 0)
             billboard.AlwaysOnTop = true
             billboard.Enabled = false
             billboard.Parent = MainGui
 
-            -- Fondo semitransparente
             local bgFrame = Instance.new("Frame")
             bgFrame.Size = UDim2.new(1, 0, 1, 0)
             bgFrame.BackgroundColor3 = Color3.new(0, 0, 0)
@@ -1140,7 +1163,6 @@ VerifyBtn.MouseButton1Click:Connect(function()
             bgFrame.Parent = billboard
             Instance.new("UICorner", bgFrame).CornerRadius = UDim.new(0, 6)
 
-            -- Barra de color por rol (izquierda)
             local roleBar = Instance.new("Frame")
             roleBar.Size = UDim2.new(0, 4, 1, 0)
             roleBar.BackgroundColor3 = C.innocent
@@ -1149,7 +1171,6 @@ VerifyBtn.MouseButton1Click:Connect(function()
             roleBar.Parent = billboard
             Instance.new("UICorner", roleBar).CornerRadius = UDim.new(0, 3)
 
-            -- Nombre del player
             local nameLbl = Instance.new("TextLabel")
             nameLbl.Size = UDim2.new(1, -8, 0.48, 0)
             nameLbl.Position = UDim2.new(0, 6, 0, 0)
@@ -1163,12 +1184,11 @@ VerifyBtn.MouseButton1Click:Connect(function()
             nameLbl.ZIndex = 3
             nameLbl.Parent = billboard
 
-            -- Label de rol
             local roleLbl = Instance.new("TextLabel")
             roleLbl.Size = UDim2.new(1, -8, 0.48, 0)
             roleLbl.Position = UDim2.new(0, 6, 0.52, 0)
             roleLbl.BackgroundTransparency = 1
-            roleLbl.Text = "😐 INOCENTE"
+            roleLbl.Text = "[INOCENTE]"
             roleLbl.TextColor3 = C.innocent
             roleLbl.TextScaled = true
             roleLbl.Font = Enum.Font.GothamBold
@@ -1177,160 +1197,126 @@ VerifyBtn.MouseButton1Click:Connect(function()
             roleLbl.ZIndex = 3
             roleLbl.Parent = billboard
 
-            -- Línea al jugador
-            local lineHolder = Instance.new("ScreenGui")
-            lineHolder.Name = "ESPLine_" .. player.Name
-            lineHolder.ResetOnSpawn = false
-            lineHolder.IgnoreGuiInset = true
-            lineHolder.Enabled = false
-            lineHolder.Parent = game:GetService("CoreGui")
-
-            local lineFrame = Instance.new("Frame")
-            lineFrame.BackgroundColor3 = C.innocent
-            lineFrame.BorderSizePixel = 0
-            lineFrame.AnchorPoint = Vector2.new(0, 0.5)
-            lineFrame.ZIndex = 2
-            lineFrame.Parent = lineHolder
-
             espObjects[player] = {
                 billboard = billboard,
-                bgFrame   = bgFrame,
                 roleBar   = roleBar,
-                nameLbl   = nameLbl,
                 roleLbl   = roleLbl,
-                lineHolder = lineHolder,
-                lineFrame  = lineFrame,
-                lastRole   = "innocent",
+                lastRole  = "",
             }
 
             player.AncestryChanged:Connect(function()
                 if not player:IsDescendantOf(game) then
-                    pcall(function() billboard:Destroy() end)
-                    pcall(function() lineHolder:Destroy() end)
+                    if billboard.Parent then billboard:Destroy() end
                     espObjects[player] = nil
+                    roleCache[player]  = nil
                 end
             end)
         end
 
-        local function updateAllESP()
-            -- ── Jugadores ──
+        -- Crea el billboard del arma (una sola vez)
+        local function ensureGunBillboard()
+            if gunFloorBillboard and gunFloorBillboard.Parent then return gunFloorBillboard end
+
+            local bb = Instance.new("BillboardGui")
+            bb.Size = UDim2.new(0, 140, 0, 36)
+            bb.StudsOffset = Vector3.new(0, 2, 0)
+            bb.AlwaysOnTop = true
+            bb.Enabled = false
+            bb.Parent = MainGui
+
+            local gbg = Instance.new("Frame")
+            gbg.Size = UDim2.new(1, 0, 1, 0)
+            gbg.BackgroundColor3 = Color3.new(0, 0, 0)
+            gbg.BackgroundTransparency = 0.45
+            gbg.BorderSizePixel = 0
+            gbg.ZIndex = 1
+            gbg.Parent = bb
+            Instance.new("UICorner", gbg).CornerRadius = UDim.new(0, 6)
+
+            local gbar = Instance.new("Frame")
+            gbar.Size = UDim2.new(0, 4, 1, 0)
+            gbar.BackgroundColor3 = C.gunFloor
+            gbar.BorderSizePixel = 0
+            gbar.ZIndex = 2
+            gbar.Parent = bb
+            Instance.new("UICorner", gbar).CornerRadius = UDim.new(0, 3)
+
+            local glbl = Instance.new("TextLabel")
+            glbl.Name = "GunLabel"
+            glbl.Size = UDim2.new(1, -8, 1, 0)
+            glbl.Position = UDim2.new(0, 8, 0, 0)
+            glbl.BackgroundTransparency = 1
+            glbl.Text = "[ARMA SHERIFF]"
+            glbl.TextColor3 = C.gunFloor
+            glbl.TextScaled = true
+            glbl.Font = Enum.Font.GothamBold
+            glbl.TextStrokeTransparency = 0.3
+            glbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+            glbl.ZIndex = 3
+            glbl.Parent = bb
+
+            gunFloorBillboard = bb
+            return bb
+        end
+
+        -- Loop ESP throttled: actualiza a ~20fps (cada 0.05s)
+        local espLastUpdate = 0
+
+        local function espTick()
+            local now = tick()
+            if now - espLastUpdate < 0.05 then return end
+            espLastUpdate = now
+
+            -- Jugadores
             for player, obj in pairs(espObjects) do
                 local char = player.Character
                 if char then
                     local head = char:FindFirstChild("Head")
-                    local hrp  = char:FindFirstChild("HumanoidRootPart")
-                    if not head or not hrp then continue end
+                    if not head then
+                        obj.billboard.Enabled = false
+                        continue
+                    end
 
-                    local role  = getRole(player)
-                    local col   = roleColor(role)
-                    local icon  = roleIcon(role)
+                    local role = getCachedRole(player)
+                    local col  = roleColor(role)
+                    local icon = roleLabel(role)
 
-                    -- Decidir si mostrar según tipo de rol
                     local showThis =
                         (role == "sheriff"  and espEnabledSheriff)  or
                         (role == "murder"   and espEnabledMurder)    or
                         (role == "innocent" and espEnabledInnocent)
 
-                    obj.billboard.Adornee = head
-                    obj.billboard.Enabled = espEnabled and showThis
+                    obj.billboard.Adornee  = head
+                    obj.billboard.Enabled  = espEnabled and showThis
 
-                    -- Actualizar colores si el rol cambió
+                    -- Solo actualizar labels si el rol cambio
                     if role ~= obj.lastRole then
-                        obj.roleBar.BackgroundColor3  = col
-                        obj.roleLbl.TextColor3        = col
-                        obj.roleLbl.Text              = icon
-                        obj.lineFrame.BackgroundColor3 = col
+                        obj.roleBar.BackgroundColor3 = col
+                        obj.roleLbl.TextColor3       = col
+                        obj.roleLbl.Text             = "[" .. icon .. "]"
                         obj.lastRole = role
                     end
-
-                    obj.roleLbl.Text  = icon
-                    obj.nameLbl.Text  = player.Name
-                    obj.roleBar.BackgroundColor3  = col
-                    obj.roleLbl.TextColor3        = col
-
-                    -- Línea
-                    if espEnabled and showThis then
-                        local sp, onScreen = camera:WorldToViewportPoint(hrp.Position)
-                        if onScreen then
-                            obj.lineHolder.Enabled = true
-                            local vp = camera.ViewportSize
-                            local dx = sp.X - vp.X/2
-                            local dy = sp.Y - vp.Y
-                            local len = math.sqrt(dx*dx + dy*dy)
-                            obj.lineFrame.Size = UDim2.new(0, len, 0, 1)
-                            obj.lineFrame.Position = UDim2.new(0, vp.X/2, 0, vp.Y)
-                            obj.lineFrame.Rotation = math.deg(math.atan2(dy, dx))
-                            obj.lineFrame.BackgroundColor3 = col
-                        else
-                            obj.lineHolder.Enabled = false
-                        end
-                    else
-                        obj.lineHolder.Enabled = false
-                    end
+                else
+                    obj.billboard.Enabled = false
                 end
             end
 
-            -- ── Arma en suelo ──
+            -- Arma en suelo (usa cache interno de findSheriffGun)
             if espEnabled and espEnabledGunFloor then
                 local gun = findSheriffGun()
                 if gun then
-                    local pos = getGunPosition(gun)
-                    if pos then
-                        -- Crear billboard si no existe
-                        if not gunFloorBillboard or not gunFloorBillboard.Parent then
-                            gunFloorBillboard = Instance.new("BillboardGui")
-                            gunFloorBillboard.Size = UDim2.new(0, 140, 0, 40)
-                            gunFloorBillboard.StudsOffset = Vector3.new(0, 2, 0)
-                            gunFloorBillboard.AlwaysOnTop = true
-                            gunFloorBillboard.Parent = MainGui
-
-                            local gbg = Instance.new("Frame")
-                            gbg.Size = UDim2.new(1, 0, 1, 0)
-                            gbg.BackgroundColor3 = Color3.new(0, 0, 0)
-                            gbg.BackgroundTransparency = 0.45
-                            gbg.BorderSizePixel = 0
-                            gbg.ZIndex = 1
-                            gbg.Parent = gunFloorBillboard
-                            Instance.new("UICorner", gbg).CornerRadius = UDim.new(0, 6)
-
-                            local gbar = Instance.new("Frame")
-                            gbar.Size = UDim2.new(0, 4, 1, 0)
-                            gbar.BackgroundColor3 = C.gunFloor
-                            gbar.BorderSizePixel = 0
-                            gbar.ZIndex = 2
-                            gbar.Parent = gunFloorBillboard
-                            Instance.new("UICorner", gbar).CornerRadius = UDim.new(0, 3)
-
-                            local glbl = Instance.new("TextLabel")
-                            glbl.Name = "GunLabel"
-                            glbl.Size = UDim2.new(1, -8, 1, 0)
-                            glbl.Position = UDim2.new(0, 8, 0, 0)
-                            glbl.BackgroundTransparency = 1
-                            glbl.Text = "🔫  ARMA SHERIFF"
-                            glbl.TextColor3 = C.gunFloor
-                            glbl.TextScaled = true
-                            glbl.Font = Enum.Font.GothamBold
-                            glbl.TextStrokeTransparency = 0.3
-                            glbl.TextStrokeColor3 = Color3.new(0, 0, 0)
-                            glbl.ZIndex = 3
-                            glbl.Parent = gunFloorBillboard
-                        end
-
-                        -- Anclar billboard a la parte más cercana del arma
-                        local adornee = nil
-                        if gun:IsA("BasePart") then adornee = gun
-                        elseif gun:IsA("Model") or gun:IsA("Tool") then
-                            adornee = gun.PrimaryPart or gun:FindFirstChildOfClass("BasePart")
-                        end
-                        if adornee then
-                            gunFloorBillboard.Adornee = adornee
-                            gunFloorBillboard.Enabled = true
-                        end
+                    local adornee = nil
+                    if gun:IsA("BasePart") then adornee = gun
+                    elseif gun:IsA("Model") or gun:IsA("Tool") then
+                        adornee = gun.PrimaryPart or gun:FindFirstChildOfClass("BasePart")
+                    end
+                    if adornee then
+                        local bb = ensureGunBillboard()
+                        bb.Adornee = adornee
+                        bb.Enabled = true
                     end
                 else
-                    if gunFloorBillboard then
-                        gunFloorBillboard.Enabled = false
-                    end
+                    if gunFloorBillboard then gunFloorBillboard.Enabled = false end
                 end
             elseif gunFloorBillboard then
                 gunFloorBillboard.Enabled = false
@@ -1340,9 +1326,9 @@ VerifyBtn.MouseButton1Click:Connect(function()
         local function toggleESP(on)
             espEnabled = on
             if on then
-                for _, p in pairs(Players:GetPlayers()) do createPlayerESP(p) end
-                espLoop = RunService.RenderStepped:Connect(updateAllESP)
-                toast("ESP MM2 ON 📡", C.accentG)
+                for _, p in ipairs(Players:GetPlayers()) do createPlayerESP(p) end
+                espLoop = RunService.Heartbeat:Connect(espTick)
+                toast("ESP ON", C.accentG)
             else
                 if espLoop then espLoop:Disconnect() espLoop = nil end
                 removeAllESP()
@@ -1354,14 +1340,13 @@ VerifyBtn.MouseButton1Click:Connect(function()
             if espEnabled then task.wait(1) createPlayerESP(p) end
         end)
 
-        -- UI del ESP
+        -- UI ESP
         secTitle(espPage, "ESP Global", 10)
         mkToggle(espPage, "Enable ESP  (MM2)", 46, toggleESP)
 
         secTitle(espPage, "Tipos de ESP", 102)
 
-        -- Sheriff
-        local function mkEspRow(parent, icon, label, col, posY, cb)
+        local function mkEspRow(parent, label, col, posY, initState, cb)
             local row = Instance.new("Frame")
             row.Size = UDim2.new(1, -20, 0, 44)
             row.Position = UDim2.new(0, 10, 0, posY)
@@ -1379,19 +1364,9 @@ VerifyBtn.MouseButton1Click:Connect(function()
             cbar.Parent = row
             Instance.new("UICorner", cbar).CornerRadius = UDim.new(0, 4)
 
-            local icLbl = Instance.new("TextLabel")
-            icLbl.Size = UDim2.new(0, 30, 1, 0)
-            icLbl.Position = UDim2.new(0, 10, 0, 0)
-            icLbl.BackgroundTransparency = 1
-            icLbl.Text = icon
-            icLbl.TextScaled = true
-            icLbl.Font = Enum.Font.GothamBold
-            icLbl.ZIndex = 6
-            icLbl.Parent = row
-
             local lbl = Instance.new("TextLabel")
-            lbl.Size = UDim2.new(0.5, 0, 1, 0)
-            lbl.Position = UDim2.new(0, 44, 0, 0)
+            lbl.Size = UDim2.new(0.6, 0, 1, 0)
+            lbl.Position = UDim2.new(0, 18, 0, 0)
             lbl.BackgroundTransparency = 1
             lbl.Text = label
             lbl.TextColor3 = col
@@ -1401,11 +1376,10 @@ VerifyBtn.MouseButton1Click:Connect(function()
             lbl.ZIndex = 6
             lbl.Parent = row
 
-            -- Toggle pequeño
             local bg = Instance.new("Frame")
             bg.Size = UDim2.new(0, 46, 0, 24)
             bg.Position = UDim2.new(1, -58, 0.5, -12)
-            bg.BackgroundColor3 = col  -- empieza ON
+            bg.BackgroundColor3 = initState and col or Color3.fromRGB(30,30,52)
             bg.BorderSizePixel = 0
             bg.ZIndex = 6
             bg.Parent = row
@@ -1413,14 +1387,14 @@ VerifyBtn.MouseButton1Click:Connect(function()
 
             local circle = Instance.new("Frame")
             circle.Size = UDim2.new(0, 18, 0, 18)
-            circle.Position = UDim2.new(1, -21, 0.5, -9)  -- ON desde inicio
-            circle.BackgroundColor3 = Color3.new(1, 1, 1)
+            circle.Position = initState and UDim2.new(1,-21,0.5,-9) or UDim2.new(0,3,0.5,-9)
+            circle.BackgroundColor3 = initState and Color3.new(1,1,1) or C.textDim
             circle.BorderSizePixel = 0
             circle.ZIndex = 7
             circle.Parent = bg
             Instance.new("UICorner", circle).CornerRadius = UDim.new(1, 0)
 
-            local state = true  -- inicia en true
+            local state = initState
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(1, 0, 1, 0)
             btn.BackgroundTransparency = 1
@@ -1441,18 +1415,20 @@ VerifyBtn.MouseButton1Click:Connect(function()
             end)
         end
 
-        mkEspRow(espPage, "🔫", "SHERIFF",     C.sheriff,  138, function(on) espEnabledSheriff  = on end)
-        mkEspRow(espPage, "🔪", "MURDER",      C.murder,   192, function(on) espEnabledMurder   = on end)
-        mkEspRow(espPage, "😐", "INOCENTES",   C.innocent, 246, function(on) espEnabledInnocent = on end)
-        mkEspRow(espPage, "🔫", "ARMA SUELO",  C.gunFloor, 300, function(on) espEnabledGunFloor = on end)
+        mkEspRow(espPage, "SHERIFF",    C.sheriff,  138, true, function(on) espEnabledSheriff  = on end)
+        mkEspRow(espPage, "MURDER",     C.murder,   192, true, function(on) espEnabledMurder   = on end)
+        mkEspRow(espPage, "INOCENTES",  C.innocent, 246, true, function(on) espEnabledInnocent = on end)
+        mkEspRow(espPage, "ARMA SUELO", C.gunFloor, 300, true, function(on)
+            espEnabledGunFloor = on
+            if not on and gunFloorBillboard then gunFloorBillboard.Enabled = false end
+        end)
 
-        -- Info
         local espInfo = Instance.new("TextLabel")
         espInfo.Size = UDim2.new(1, -20, 0, 60)
         espInfo.Position = UDim2.new(0, 10, 0, 360)
         espInfo.BackgroundColor3 = C.bg3
         espInfo.TextColor3 = C.textDim
-        espInfo.Text = "  Los roles se detectan por\n  las tools del jugador (Knife/Revolver)\n  y por valores de rol en el char."
+        espInfo.Text = "  Roles detectados via tools (Knife / Revolver)\n  y por valores de rol en el personaje.\n  Actualizacion: ~20fps para menor lag."
         espInfo.TextScaled = true
         espInfo.Font = Enum.Font.Gotham
         espInfo.TextXAlignment = Enum.TextXAlignment.Left
@@ -1462,12 +1438,12 @@ VerifyBtn.MouseButton1Click:Connect(function()
         espInfo.Parent = espPage
         Instance.new("UICorner", espInfo).CornerRadius = UDim.new(0, 10)
         local eip = Instance.new("UIPadding", espInfo)
-        eip.PaddingTop = UDim.new(0, 8)
+        eip.PaddingTop  = UDim.new(0, 8)
         eip.PaddingLeft = UDim.new(0, 6)
 
-        -- ═══════════════════════════════════════
-        --  MISC
-        -- ═══════════════════════════════════════
+        -- ════════════════════════════════════════
+        --  MISC TAB
+        -- ════════════════════════════════════════
         secTitle(miscPage, "UI Controls", 10)
         local hkLbl = Instance.new("TextLabel")
         hkLbl.Size = UDim2.new(1, -20, 0, 32)
@@ -1484,9 +1460,9 @@ VerifyBtn.MouseButton1Click:Connect(function()
         Instance.new("UICorner", hkLbl).CornerRadius = UDim.new(0, 8)
 
         local changingKey = false
-        local ckBtn = mkButton(miscPage, "🎮  Cambiar Tecla", 88, C.accent, function()
+        local ckBtn = mkButton(miscPage, "Cambiar Tecla", 88, C.accent, function()
             changingKey = true
-            ckBtn.Text = "⌨  Presiona una tecla..."
+            ckBtn.Text = "Presiona una tecla..."
             TweenService:Create(ckBtn, TweenInfo.new(0.2), {BackgroundColor3 = C.accentY}):Play()
         end)
 
@@ -1495,39 +1471,47 @@ VerifyBtn.MouseButton1Click:Connect(function()
             Lighting.Brightness = on and 8 or 1
             Lighting.FogEnd = on and 9e8 or 100000
             for _, v in pairs(Lighting:GetChildren()) do
-                if v:IsA("ColorCorrectionEffect") or v:IsA("BloomEffect") or v:IsA("BlurEffect") then v.Enabled = not on end
+                if v:IsA("ColorCorrectionEffect") or v:IsA("BloomEffect") or v:IsA("BlurEffect") then
+                    v.Enabled = not on
+                end
             end
             toast(on and "Fullbright ON" or "Fullbright OFF", on and C.accentG or C.accentR)
         end)
         mkToggle(miscPage, "Invisible (Local)", 232, function(on)
             local c = lp.Character
-            if c then for _, p in pairs(c:GetDescendants()) do if p:IsA("BasePart") or p:IsA("Decal") then p.Transparency = on and 1 or 0 end end end
+            if c then
+                for _, p in pairs(c:GetDescendants()) do
+                    if p:IsA("BasePart") or p:IsA("Decal") then p.Transparency = on and 1 or 0 end
+                end
+            end
             toast(on and "Invisible ON" or "Invisible OFF", on and C.accentG or C.accentR)
         end)
 
-        -- ═══════════════════════════════════════
-        --  MINIMIZAR + DRAG + INPUT
-        -- ═══════════════════════════════════════
+        -- ════════════════════════════════════════
+        --  MINIMIZAR + DRAG + HOTKEY
+        -- ════════════════════════════════════════
         local minimized = false
         MinBtn.MouseButton1Click:Connect(function()
             minimized = not minimized
             if minimized then
-                for _, c in pairs(Main:GetChildren()) do if c ~= MinBtn then c.Visible = false end end
+                for _, child in pairs(Main:GetChildren()) do
+                    if child ~= MinBtn then child.Visible = false end
+                end
                 TweenService:Create(Main, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-                    Size = UDim2.new(0, 46, 0, 46),
+                    Size     = UDim2.new(0, 46, 0, 46),
                     Position = UDim2.new(1, -60, 0, 12),
                 }):Play()
-                MinBtn.Text = "☰"
+                MinBtn.Text = "="
                 TweenService:Create(MinBtn, TweenInfo.new(0.15), {BackgroundColor3 = C.accent}):Play()
                 MinBtn.Position = UDim2.new(0, 6, 0, 6)
             else
                 TweenService:Create(Main, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                    Size = UDim2.new(0, 620, 0, 430),
+                    Size     = UDim2.new(0, 620, 0, 430),
                     Position = UDim2.new(0.5, -310, 0.5, -215),
                 }):Play()
                 task.wait(0.18)
-                for _, c in pairs(Main:GetChildren()) do c.Visible = true end
-                MinBtn.Text = "✕"
+                for _, child in pairs(Main:GetChildren()) do child.Visible = true end
+                MinBtn.Text = "X"
                 TweenService:Create(MinBtn, TweenInfo.new(0.15), {BackgroundColor3 = C.accentR}):Play()
                 MinBtn.Position = UDim2.new(1, -46, 0.5, -17)
             end
@@ -1537,11 +1521,13 @@ VerifyBtn.MouseButton1Click:Connect(function()
             if changingKey and input.UserInputType == Enum.UserInputType.Keyboard then
                 hideKey = input.KeyCode
                 hkLbl.Text = "  Hide Key: " .. input.KeyCode.Name
-                ckBtn.Text = "🎮  Cambiar Tecla"
+                ckBtn.Text = "Cambiar Tecla"
                 TweenService:Create(ckBtn, TweenInfo.new(0.2), {BackgroundColor3 = C.accent}):Play()
                 changingKey = false
-                toast("Tecla cambiada: " .. input.KeyCode.Name, C.accentB)
-            elseif not changingKey and input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == hideKey then
+                toast("Tecla: " .. input.KeyCode.Name, C.accentB)
+            elseif not changingKey
+                and input.UserInputType == Enum.UserInputType.Keyboard
+                and input.KeyCode == hideKey then
                 uiVisible = not uiVisible
                 Main.Visible = uiVisible
             end
@@ -1549,32 +1535,38 @@ VerifyBtn.MouseButton1Click:Connect(function()
 
         local dragging, dStart, dPos
         Header.InputBegan:Connect(function(i)
-            if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            if i.UserInputType == Enum.UserInputType.MouseButton1
+            or i.UserInputType == Enum.UserInputType.Touch then
                 dragging = true dStart = i.Position dPos = Main.Position
             end
         end)
         Header.InputEnded:Connect(function(i)
-            if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+            if i.UserInputType == Enum.UserInputType.MouseButton1
+            or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
         end)
         UserInputService.InputChanged:Connect(function(i)
-            if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement
+            or i.UserInputType == Enum.UserInputType.Touch) then
                 local d = i.Position - dStart
-                Main.Position = UDim2.new(dPos.X.Scale, dPos.X.Offset + d.X, dPos.Y.Scale, dPos.Y.Offset + d.Y)
+                Main.Position = UDim2.new(
+                    dPos.X.Scale, dPos.X.Offset + d.X,
+                    dPos.Y.Scale, dPos.Y.Offset + d.Y
+                )
             end
         end)
 
-        toast("⚡ Diogo Script MM2 cargado!", C.accent)
+        toast("Diogo Script MM2 cargado!", C.accent)
 
     else
         KStatus.TextColor3 = C.accentR
-        KStatus.Text = "✗  Key incorrecta."
+        KStatus.Text = "Key incorrecta."
         for i = 1, 3 do
             TweenService:Create(KF, TweenInfo.new(0.05), {Position = UDim2.new(0.5, 10, 0.5, 0)}):Play()
             task.wait(0.06)
             TweenService:Create(KF, TweenInfo.new(0.05), {Position = UDim2.new(0.5, -10, 0.5, 0)}):Play()
             task.wait(0.06)
         end
-        TweenService:Create(KF, TweenInfo.new(0.1), {Position = UDim2.new(0.5, 0, 0.5, 0)}):Play()
+        TweenService:Create(KF, TweenInfo.new(0.1),  {Position = UDim2.new(0.5, 0, 0.5, 0)}):Play()
         TweenService:Create(KStr, TweenInfo.new(0.2), {Color = C.accentR}):Play()
         task.wait(1.2)
         TweenService:Create(KStr, TweenInfo.new(0.4), {Color = C.accent}):Play()
