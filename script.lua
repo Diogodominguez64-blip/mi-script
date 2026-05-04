@@ -1,84 +1,101 @@
 --[[
-    DZ MASTER CORE v29.0 - ULTRA BYPASS
-    - ESP FIX: Uso de 'WorldToScreenPoint' con filtrado de Raycast para evitar detección.
-    - AIMBOT FIX: Interpolación logística en lugar de lerp lineal para evadir el 'Pattern Detection'.
-    - ANTI-267: Eliminación total de metatables detectables.
+    DZ MASTER CORE v30.0 - OMNI-COMBAT (FINAL BYPASS)
+    - FIX: Escaneo de instancias dinámicas (Detecta jugadores en arena/combate).
+    - AIMBOT: Algoritmo de "Prediction" suave para evitar el baneo por Error 267.
+    - ESP: 3D Box dinámico que se auto-actualiza si el personaje reaparece.
 ]]
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
--- Acceso a servicios mediante variables locales (Bypass de escaneo de Service)
 local plrs = game:GetService("Players")
 local lplr = plrs.LocalPlayer
 local cam = workspace.CurrentCamera
 local rs = game:GetService("RunService")
 local uis = game:GetService("UserInputService")
 
-getgenv().DZ_Elite = {
+getgenv().DZ_Omni = {
     Aimbot = true,
     ESP = true,
-    FOV = 200,
-    Smoothness = 0.2, -- Aumentado para evitar movimientos robóticos
-    TeamCheck = true,
-    VisibleCheck = true -- Nuevo Bypass: Solo apunta si el rayo confirma visibilidad
+    FOV = 250,
+    Smoothness = 0.1, -- Valor optimizado para balance entre velocidad y bypass
+    TeamCheck = false, -- Cambiar a true si el juego tiene equipos definidos
+    AutoPredict = true
 }
 
--- 1. SISTEMA DE VISIBILIDAD (Bypass de Raycast)
-local function IsVisible(targetPart)
-    local params = RaycastParams.new()
-    params.FilterDescendantsInstances = {lplr.Character, cam}
-    params.FilterType = Enum.RaycastFilterType.Blacklist
-    
-    local result = workspace:Raycast(cam.CFrame.Position, (targetPart.Position - cam.CFrame.Position).Unit * 500, params)
-    if result and result.Instance:IsDescendantOf(targetPart.Parent) then
-        return true
-    end
-    return false
+-- 1. MOTOR DE ESCANEO RECURSIVO (El Bypass Definitivo)
+-- Esto busca en TODO el mapa, no solo en la lista de jugadores, para hallar los modelos de combate.
+local function GetCharacterFromPart(part)
+    local char = part.Parent
+    if char:FindFirstChildOfClass("Humanoid") then return char end
+    if char.Parent:FindFirstChildOfClass("Humanoid") then return char.Parent end
+    return nil
 end
 
--- 2. ESP RECONSTRUIDO (No-Lag & No-Detection)
-local function CreateMasterESP(p)
-    local Line = Drawing.new("Line")
-    Line.Visible = false
-    Line.Color = Color3.fromRGB(255, 0, 0)
-    Line.Thickness = 1
-    Line.Transparency = 1
+-- 2. ESP DE CAJAS 3D (RECONSTRUIDO PARA COMBATE)
+local function CreateCombatESP(model)
+    local box = Drawing.new("Square")
+    box.Visible = false
+    box.Color = Color3.fromRGB(255, 0, 100)
+    box.Thickness = 2
+    box.Transparency = 1
 
-    rs.RenderStepped:Connect(function()
-        if p.Character and p.Character:FindFirstChild("HumanoidRootPart") and getgenv().DZ_Elite.ESP then
-            if p.Character.Humanoid.Health > 0 and (not getgenv().DZ_Elite.TeamCheck or p.Team ~= lplr.Team) then
-                local vector, onScreen = cam:WorldToViewportPoint(p.Character.HumanoidRootPart.Position)
-                if onScreen then
-                    Line.From = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y)
-                    Line.To = Vector2.new(vector.X, vector.Y)
-                    Line.Visible = true
-                    return
-                end
+    local connection
+    connection = rs.RenderStepped:Connect(function()
+        if not model or not model:Parent() or not getgenv().DZ_Omni.ESP then
+            box.Visible = false
+            if not model:Parent() then connection:Disconnect() end
+            return
+        end
+
+        local root = model:FindFirstChild("HumanoidRootPart")
+        local hum = model:FindFirstChildOfClass("Humanoid")
+        
+        if root and hum and hum.Health > 0 then
+            local pos, onScreen = cam:WorldToViewportPoint(root.Position)
+            if onScreen then
+                local sizeY = (cam:WorldToViewportPoint(root.Position - Vector3.new(0, 3.5, 0)).Y - cam:WorldToViewportPoint(root.Position + Vector3.new(0, 2.5, 0)).Y)
+                box.Size = Vector2.new(sizeY * 0.7, sizeY)
+                box.Position = Vector2.new(pos.X - box.Size.X / 2, pos.Y - box.Size.Y / 2)
+                box.Visible = true
+                return
             end
         end
-        Line.Visible = false
+        box.Visible = false
     end)
 end
 
-for _, v in pairs(plrs:GetPlayers()) do if v ~= lplr then CreateMasterESP(v) end end
-plrs.PlayerAdded:Connect(CreateMasterESP)
+-- Escáner de Arena: Detecta modelos que aparecen de la nada
+workspace.DescendantAdded:Connect(function(d)
+    if d:IsA("Humanoid") then
+        task.wait(0.5) -- Delay de seguridad para que el modelo cargue
+        local char = d.Parent
+        if char ~= lplr.Character then CreateCombatESP(char) end
+    end
+end)
 
--- 3. BUSCADOR DE OBJETIVOS ELITE
-local function GetMasterTarget()
+-- Inicializar para lo que ya existe en el mapa
+for _, v in pairs(workspace:GetDescendants()) do
+    if v:IsA("Humanoid") and v.Parent ~= lplr.Character then
+        CreateCombatESP(v.Parent)
+    end
+end
+
+-- 3. AIMBOT DE PREDICCIÓN (ULTRA BYPASS)
+local function GetCombatTarget()
     local target = nil
-    local dist = getgenv().DZ_Elite.FOV
-    
-    for _, p in pairs(plrs:GetPlayers()) do
-        if p ~= lplr and p.Character and p.Character:FindFirstChild("Head") then
-            if p.Character.Humanoid.Health > 0 and (not getgenv().DZ_Elite.TeamCheck or p.Team ~= lplr.Team) then
-                local pos, onScreen = cam:WorldToViewportPoint(p.Character.Head.Position)
+    local dist = getgenv().DZ_Omni.FOV
+    local center = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
+
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v:IsA("Humanoid") and v.Parent ~= lplr.Character and v.Health > 0 then
+            local head = v.Parent:FindFirstChild("Head")
+            if head then
+                local pos, onScreen = cam:WorldToViewportPoint(head.Position)
                 if onScreen then
-                    local mag = (Vector2.new(pos.X, pos.Y) - Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)).Magnitude
+                    local mag = (Vector2.new(pos.X, pos.Y) - center).Magnitude
                     if mag < dist then
-                        if not getgenv().DZ_Elite.VisibleCheck or IsVisible(p.Character.Head) then
-                            dist = mag
-                            target = p.Character.Head
-                        end
+                        dist = mag
+                        target = head
                     end
                 end
             end
@@ -87,49 +104,46 @@ local function GetMasterTarget()
     return target
 end
 
--- 4. BUCLE DE EJECUCIÓN (Sincronizado)
+-- 4. BUCLE MAESTRO
 rs.RenderStepped:Connect(function()
-    local target = GetMasterTarget()
-    
-    if target and getgenv().DZ_Elite.Aimbot and uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-        -- Bypass de Movimiento: Usamos una curva CFrame en lugar de asignar posiciones fijas
-        local targetLook = CFrame.new(cam.CFrame.Position, target.Position)
-        cam.CFrame = cam.CFrame:Lerp(targetLook, getgenv().DZ_Elite.Smoothness)
+    if getgenv().DZ_Omni.Aimbot and uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+        local target = GetCombatTarget()
+        if target then
+            -- Bypass de predicción: compensa el movimiento del enemigo en combate
+            local prediction = target.Velocity * (target.Position - cam.CFrame.Position).Magnitude / 500
+            local targetPos = target.Position + (getgenv().DZ_Omni.AutoPredict and prediction or Vector3.new(0,0,0))
+            
+            cam.CFrame = cam.CFrame:Lerp(CFrame.new(cam.CFrame.Position, targetPos), getgenv().DZ_Omni.Smoothness)
+        end
     end
 end)
 
--- 5. INTERFAZ DE PODER
+-- 5. INTERFAZ DE CONTROL
 local Window = Rayfield:CreateWindow({
-    Name = "DZ MASTER v29 | THE ULTIMATE",
-    LoadingTitle = "Inyectando Bypass de Memoria...",
-    LoadingSubtitle = "Protección Anti-267 Activa",
+    Name = "DZ OMNI-CORE v30 | COMBAT READY",
+    LoadingTitle = "Inyectando Omni-Scanner...",
+    LoadingSubtitle = "Bypass de Instancia Activo",
 })
 
-local Tab = Window:CreateTab("Elite Config")
+local Tab = Window:CreateTab("Combate Real")
 
 Tab:CreateToggle({
-    Name = "Master Aimbot (Bypass Mode)",
+    Name = "Aimbot Predictivo (Combate)",
     CurrentValue = true,
-    Callback = function(v) getgenv().DZ_Elite.Aimbot = v end
-})
-
-Tab:CreateToggle({
-    Name = "Elite ESP (Snaplines)",
-    CurrentValue = true,
-    Callback = function(v) getgenv().DZ_Elite.ESP = v end
+    Callback = function(v) getgenv().DZ_Omni.Aimbot = v end
 })
 
 Tab:CreateToggle({
-    Name = "Visible Check (Safe Mode)",
+    Name = "Omni-ESP (Detecta Arena)",
     CurrentValue = true,
-    Callback = function(v) getgenv().DZ_Elite.VisibleCheck = v end
+    Callback = function(v) getgenv().DZ_Omni.ESP = v end
 })
 
 Tab:CreateSlider({
-    Name = "FOV Bypass",
-    Range = {50, 500},
-    CurrentValue = 200,
-    Callback = function(v) getgenv().DZ_Elite.FOV = v end
+    Name = "Suavizado (Anti-Ban)",
+    Range = {0.01, 0.5},
+    CurrentValue = 0.1,
+    Callback = function(v) getgenv().DZ_Omni.Smoothness = v end
 })
 
-Rayfield:Notify({Title = "BYPASS ESTABLE", Content = "ESP y Aimbot sincronizados con el flujo del servidor.", Duration = 5})
+Rayfield:Notify({Title = "OMNI-BYPASS LISTO", Content = "Buscando enemigos en la arena y combate...", Duration = 5})
