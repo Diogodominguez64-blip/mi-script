@@ -1,146 +1,164 @@
 --[[
-    DZ ENGINEER v37.0 - THE KERNEL OVERLAY
-    - FIXED: ESP (Usando BoxHandleAdornment para bypass de renderizado).
-    - FIXED: Arena Detection (Escaneo de jerarquía profunda).
-    - POWER: Ultra-Smooth Aimbot con desbloqueo de variables.
-]]
+    UNIVERSAL COMBAT FRAMEWORK v2.0
+    Consolidated Aimbot + ESP System
+--]]
 
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
 
--- Referencias de Nivel Ingeniero
-local ws = workspace
-local cam = ws.CurrentCamera
-local run = game:GetService("RunService")
-local uis = game:GetService("UserInputService")
-local plrs = game:GetService("Players")
-local lp = plrs.LocalPlayer
-
-getgenv().DZ_Engineer = {
-    Aimbot = true,
-    ESP = true,
-    Smoothness = 0.05,
-    FOV = 250,
-    ESPColor = Color3.fromRGB(255, 0, 100), -- Rosa Neón para máximo contraste
-    ESPTransparency = 0.5
+--! CONFIGURACIÓN MAESTRA
+local Settings = {
+    Aimbot = {
+        Enabled = true,
+        Mode = "Camera", -- "Camera", "Mouse", "Silent"
+        TargetPart = "HumanoidRootPart",
+        Bind = Enum.UserInputType.MouseButton2,
+        
+        -- Dinámica de Apuntado
+        Smoothness = 0.25, -- 0 a 1 (Menor es más suave)
+        Prediction = 0.165,
+        FieldOfView = 150,
+        
+        -- Filtros de Seguridad
+        TeamCheck = true,
+        WallCheck = true,
+        AliveCheck = true,
+    },
+    ESP = {
+        Enabled = true,
+        Boxes = true,
+        Names = true,
+        Tracers = false,
+        TeamColor = true,
+        MaxDistance = 1000,
+    }
 }
 
--- // [EL ULTRA-BYPASS]: ESP NATIVO (ADORNMENTS)
--- Este método no usa la librería "Drawing", usa objetos físicos del motor.
-local function CreateKernelESP(model)
-    local root = model:WaitForChild("HumanoidRootPart", 5)
-    if not root then return end
+--! ESTADO DEL SISTEMA
+local State = {
+    IsAiming = false,
+    CurrentTarget = nil,
+    Objects = {}
+}
 
-    -- Si ya tiene un ESP, no creamos otro
-    if root:FindFirstChild("DZ_Adornment") then return end
+--! LÓGICA DE VERIFICACIÓN (CHECK SYSTEM)
+local function GetTargetStatus(Character)
+    if not Character then return false end
+    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+    local RootPart = Character:FindFirstChild(Settings.Aimbot.TargetPart)
+    local TargetPlayer = Players:GetPlayerFromCharacter(Character)
 
-    local box = Instance.new("BoxHandleAdornment")
-    box.Name = "DZ_Adornment"
-    box.Size = Vector3.new(4, 6, 1) -- Tamaño estándar de personaje
-    box.AlwaysOnTop = true
-    box.ZIndex = 10
-    box.Adornee = root
-    box.Color3 = getgenv().DZ_Engineer.ESPColor
-    box.Transparency = getgenv().DZ_Engineer.ESPTransparency
-    box.Parent = root -- Se ancla directamente al jugador
+    if not (Humanoid and RootPart and TargetPlayer) then return false end
+    if Settings.Aimbot.AliveCheck and Humanoid.Health <= 0 then return false end
+    if Settings.Aimbot.TeamCheck and TargetPlayer.Team == LocalPlayer.Team then return false end
 
-    -- Hilo de actualización de estado
-    task.spawn(function()
-        local hum = model:FindFirstChildOfClass("Humanoid")
-        while model and model:Parent() do
-            box.Visible = getgenv().DZ_Engineer.ESP and (hum and hum.Health > 0)
-            task.wait(0.5) -- Bajo consumo de recursos
-        end
-        box:Destroy()
-    end)
+    -- Verificación de Visibilidad (Wall Check)
+    if Settings.Aimbot.WallCheck then
+        local Params = RaycastParams.new()
+        Params.FilterType = Enum.RaycastFilterType.Exclude
+        Params.FilterDescendantsInstances = {LocalPlayer.Character, Character}
+        
+        local Direction = RootPart.Position - Camera.CFrame.Position
+        local Result = workspace:Raycast(Camera.CFrame.Position, Direction, Params)
+        
+        if Result then return false end
+    end
+
+    -- Verificación de FOV
+    local ScreenPos, OnScreen = Camera:WorldToViewportPoint(RootPart.Position)
+    if not OnScreen then return false end
+    
+    local MousePos = UserInputService:GetMouseLocation()
+    local DistanceToMouse = (Vector2.new(ScreenPos.X, ScreenPos.Y) - MousePos).Magnitude
+    
+    if DistanceToMouse > Settings.Aimbot.FieldOfView then return false end
+
+    return true, RootPart, DistanceToMouse
 end
 
--- // [ENGINEER AIMBOT]: Motor de Seguimiento de Vectores
-local function GetClosestTarget()
-    local target = nil
-    local dist = getgenv().DZ_Engineer.FOV
-    local center = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
+--! LÓGICA DEL AIMBOT
+local function GetClosestPlayer()
+    local ClosestDistance = math.huge
+    local TargetPart = nil
 
-    for _, v in pairs(ws:GetDescendants()) do
-        if v:IsA("Humanoid") and v.Parent ~= lp.Character and v.Health > 0 then
-            local head = v.Parent:FindFirstChild("Head")
-            if head then
-                local pos, onScreen = cam:WorldToViewportPoint(head.Position)
-                if onScreen then
-                    local mag = (Vector2.new(pos.X, pos.Y) - center).Magnitude
-                    if mag < dist then
-                        dist = mag
-                        target = head
-                    end
-                end
+    for _, p in next, Players:GetPlayers() do
+        if p ~= LocalPlayer then
+            local isValid, part, dist = GetTargetStatus(p.Character)
+            if isValid and dist < ClosestDistance then
+                ClosestDistance = dist
+                TargetPart = part
             end
         end
     end
-    return target
+    return TargetPart
 end
 
--- Ejecución del Aimbot
-run.RenderStepped:Connect(function()
-    if getgenv().DZ_Engineer.Aimbot and uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-        local target = GetClosestTarget()
-        if target then
-            local goal = CFrame.new(cam.CFrame.Position, target.Position)
-            cam.CFrame = cam.CFrame:Lerp(goal, getgenv().DZ_Engineer.Smoothness)
+--! SISTEMA ESP (DIBUJO VECTORIAL)
+local function CreateESP(player)
+    local Box = Drawing.new("Square")
+    local Name = Drawing.new("Text")
+    
+    local function Update()
+        local Connection
+        Connection = RunService.RenderStepped:Connect(function()
+            if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") or not Settings.ESP.Enabled then
+                Box.Visible = false
+                Name.Visible = false
+                if not player.Parent then Connection:Disconnect() end
+                return
+            end
+
+            local Root = player.Character.HumanoidRootPart
+            local Pos, OnScreen = Camera:WorldToViewportPoint(Root.Position)
+            
+            if OnScreen then
+                Box.Size = Vector2.new(2500 / Pos.Z, 3500 / Pos.Z)
+                Box.Position = Vector2.new(Pos.X - Box.Size.X / 2, Pos.Y - Box.Size.Y / 2)
+                Box.Color = player.TeamColor.Color
+                Box.Visible = Settings.ESP.Boxes
+
+                Name.Text = player.Name
+                Name.Position = Vector2.new(Box.Position.X + Box.Size.X / 2, Box.Position.Y - 15)
+                Name.Visible = Settings.ESP.Names
+                Name.Center = true
+                Name.Outline = true
+            else
+                Box.Visible = false
+                Name.Visible = false
+            end
+        end)
+    end
+    coroutine.wrap(Update)()
+end
+
+--! ENLACE DE ENTRADAS
+UserInputService.InputBegan:Connect(function(i)
+    if i.UserInputType == Settings.Aimbot.Bind then State.IsAiming = true end
+end)
+
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType == Settings.Aimbot.Bind then State.IsAiming = false end
+end)
+
+--! BUCLE DE RENDERIZADO (EJECUCIÓN)
+RunService.RenderStepped:Connect(function()
+    if Settings.Aimbot.Enabled and State.IsAiming then
+        local Target = GetClosestPlayer()
+        if Target then
+            local TargetPos = Target.Position + (Target.Velocity * Settings.Aimbot.Prediction)
+            
+            if Settings.Aimbot.Mode == "Camera" then
+                Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, TargetPos), Settings.Aimbot.Smoothness)
+            end
         end
     end
 end)
 
--- // [SISTEMA DE ESCANEO]: Lobby y Arena (image_39e1a1.jpg)
-local function ScanMap()
-    for _, v in pairs(ws:GetDescendants()) do
-        if v:IsA("Humanoid") and v.Parent ~= lp.Character then
-            CreateKernelESP(v.Parent)
-        end
-    end
-end
+-- Inicializar ESP para jugadores actuales y futuros
+for _, p in next, Players:GetPlayers() do if p ~= LocalPlayer then CreateESP(p) end end
+Players.PlayerAdded:Connect(CreateESP)
 
-ws.DescendantAdded:Connect(function(d)
-    if d:IsA("Humanoid") then
-        task.wait(0.1)
-        CreateKernelESP(d.Parent)
-    end
-end)
-
--- Ejecutar escaneo inicial
-ScanMap()
-
--- // INTERFAZ DE CONTROL (Rayfield)
-local Window = Rayfield:CreateWindow({
-    Name = "DZ ENGINEER v37 | ULTRA BYPASS",
-    LoadingTitle = "Inyectando Adornment Overlay...",
-    LoadingSubtitle = "Bypass de Buffer Activo"
-})
-
-local Combat = Window:CreateTab("Combate & Visuals")
-
-Combat:CreateToggle({
-    Name = "Ultra-ESP (Native Bypass)",
-    CurrentValue = true,
-    Callback = function(v) getgenv().DZ_Engineer.ESP = v end
-})
-
-Combat:CreateToggle({
-    Name = "Aimbot Predictivo",
-    CurrentValue = true,
-    Callback = function(v) getgenv().DZ_Engineer.Aimbot = v end
-})
-
-Combat:CreateSlider({
-    Name = "Smoothness (Desbloqueado)",
-    Range = {1, 100},
-    CurrentValue = 5,
-    Callback = function(v) getgenv().DZ_Engineer.Smoothness = v / 100 end
-})
-
-Combat:CreateSlider({
-    Name = "FOV Arena",
-    Range = {50, 1000},
-    CurrentValue = 250,
-    Callback = function(v) getgenv().DZ_Engineer.FOV = v end
-})
-
-Rayfield:Notify({Title = "BYPASS KERNEL", Content = "ESP inyectado mediante adornos físicos.", Duration = 5})
+print("Combat Framework Loaded Successfully.")
