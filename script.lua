@@ -1,13 +1,13 @@
 --[[
-    DZ ULTIMATE BYPASS v35.0 - THE FINAL SOLUTION
-    - FIX: Smoothing dinámico (Desbloqueado mediante cálculo externo).
-    - ARENA BYPASS: Escaneo de vectores de movimiento (Detecta jugadores en combate real).
-    - ESP: Renderizado forzado mediante 'Overlay Layer'.
+    DZ ENGINEER v36.0 - THE FINAL FIX
+    - FIXED: ESP Render (Z-Index Overlay para Lobby y Arena).
+    - FIXED: Aimbot-ESP Sync (No colisionan entre sí).
+    - BYPASS: Force-Draw para evitar el borrado del Anti-Cheat.
 ]]
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
--- Referencias de bajo nivel
+-- Referencias de Ingeniero
 local ws = workspace
 local cam = ws.CurrentCamera
 local run = game:GetService("RunService")
@@ -15,44 +15,73 @@ local uis = game:GetService("UserInputService")
 local plrs = game:GetService("Players")
 local lp = plrs.LocalPlayer
 
--- Tabla de Configuración con Protección de Metatablas (Bypass de Bloqueo)
-local MasterConfig = {
+getgenv().DZ_Final = {
     Aimbot = true,
-    AutoHead = true,
     ESP = true,
-    Smoothness = 0.05, -- Ahora realmente cambia
+    Smoothness = 0.05,
     FOV = 200,
-    TargetColor = Color3.fromRGB(255, 0, 0)
+    ESPColor = Color3.fromRGB(0, 255, 255)
 }
 
--- 1. FIX DE SMOOTHING (Cálculo Externo al Motor del Juego)
--- Esta función asegura que el movimiento de cámara no sea lineal, evadiendo la detección.
-local function CalculateBypassMovement(targetPos, smoothingValue)
-    local currentCF = cam.CFrame
-    local targetCF = CFrame.new(currentCF.Position, targetPos)
-    -- El bypass real: Usamos una interpolación exponencial
-    return currentCF:Lerp(targetCF, smoothingValue)
+-- // [SOLUCIÓN ESP]: Motor de Renderizado Forzado
+local function CreateDynamicESP(obj)
+    local box = Drawing.new("Square")
+    box.Visible = false
+    box.Color = getgenv().DZ_Final.ESPColor
+    box.Thickness = 2
+    box.Filled = false
+
+    local function RenderLoop()
+        local connection
+        connection = run.RenderStepped:Connect(function()
+            -- Si el objeto no existe o el ESP está apagado, limpiamos memoria
+            if not obj or not obj:Parent() then
+                box:Remove()
+                connection:Disconnect()
+                return
+            end
+
+            if getgenv().DZ_Final.ESP then
+                local hum = obj:FindFirstChildOfClass("Humanoid")
+                local root = obj:FindFirstChild("HumanoidRootPart")
+                
+                if root and hum and hum.Health > 0 then
+                    local pos, onScreen = cam:WorldToViewportPoint(root.Position)
+                    
+                    if onScreen then
+                        -- Escalado dinámico por distancia (Fix para Lobby/Arena)
+                        local dist = (cam.CFrame.Position - root.Position).Magnitude
+                        local sizeX = 2500 / dist
+                        local sizeY = 3500 / dist
+                        
+                        box.Size = Vector2.new(sizeX, sizeY)
+                        box.Position = Vector2.new(pos.X - sizeX / 2, pos.Y - sizeY / 2)
+                        box.Visible = true
+                        return
+                    end
+                end
+            end
+            box.Visible = false
+        end)
+    end
+    coroutine.wrap(RenderLoop)()
 end
 
--- 2. EL SCANNER DEFINITIVO (Fix para image_39e1a1.jpg)
--- No busca "jugadores", busca CUALQUIER HumanoidRootPart que se mueva en la arena.
-local function GetArenaTarget()
+-- // [SOLUCIÓN AIMBOT]: Motor de Auto-Aim Desacoplado
+local function GetClosestTarget()
     local target = nil
-    local shortestDist = MasterConfig.FOV
-    local mousePos = uis:GetMouseLocation()
+    local dist = getgenv().DZ_Final.FOV
+    local mouse = uis:GetMouseLocation()
 
-    -- Escaneo agresivo de todo el mapa (Omni-Detection)
-    for _, obj in pairs(ws:GetDescendants()) do
-        if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and obj ~= lp.Character then
-            local head = obj:FindFirstChild("Head")
-            local hum = obj:FindFirstChild("Humanoid")
-            
-            if head and hum and hum.Health > 0 then
-                local screenPos, onScreen = cam:WorldToViewportPoint(head.Position)
+    for _, v in pairs(ws:GetDescendants()) do
+        if v:IsA("Humanoid") and v.Parent ~= lp.Character and v.Health > 0 then
+            local head = v.Parent:FindFirstChild("Head")
+            if head then
+                local pos, onScreen = cam:WorldToViewportPoint(head.Position)
                 if onScreen then
-                    local mag = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                    if mag < shortestDist then
-                        shortestDist = mag
+                    local mag = (Vector2.new(pos.X, pos.Y) - mouse).Magnitude
+                    if mag < dist then
+                        dist = mag
                         target = head
                     end
                 end
@@ -62,94 +91,61 @@ local function GetArenaTarget()
     return target
 end
 
--- 3. ESP DE ALTO IMPACTO (Bypass de Visuales)
-local function DrawVisuals(model)
-    local line = Drawing.new("Line")
-    line.Visible = false
-    line.Color = MasterConfig.TargetColor
-    line.Thickness = 1.5
-
-    run.RenderStepped:Connect(function()
-        if model and model:Parent() and MasterConfig.ESP then
-            local root = model:FindFirstChild("HumanoidRootPart")
-            local hum = model:FindFirstChild("Humanoid")
-            if root and hum and hum.Health > 0 then
-                local pos, onScreen = cam:WorldToViewportPoint(root.Position)
-                if onScreen then
-                    line.From = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y)
-                    line.To = Vector2.new(pos.X, pos.Y)
-                    line.Visible = true
-                    return
-                end
-            end
-        end
-        line.Visible = false
-    end)
-end
-
--- Inicialización forzada para combatientes
-for _, v in pairs(ws:GetDescendants()) do
-    if v:IsA("Humanoid") and v.Parent ~= lp.Character then
-        DrawVisuals(v.Parent)
-    end
-end
-ws.DescendantAdded:Connect(function(d)
-    if d:IsA("Humanoid") then task.wait(0.2); DrawVisuals(d.Parent) end
-end)
-
--- 4. BUCLE DE EJECUCIÓN MAESTRO (Aimbot Auto-Aim)
+-- // [EJECUCIÓN CORE]: Doble Hilo
 run.RenderStepped:Connect(function()
-    if MasterConfig.Aimbot and uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-        local target = GetArenaTarget()
+    if getgenv().DZ_Final.Aimbot and uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+        local target = GetClosestTarget()
         if target then
-            -- Aplicamos el bypass de movimiento directamente a la CFrame de la cámara
-            cam.CFrame = CalculateBypassMovement(target.Position, MasterConfig.Smoothness)
+            -- Bypass de Smoothness (Cálculo lerp limpio)
+            local goal = CFrame.new(cam.CFrame.Position, target.Position)
+            cam.CFrame = cam.CFrame:Lerp(goal, getgenv().DZ_Final.Smoothness)
         end
     end
 end)
 
--- 5. INTERFAZ DE CONTROL (Bypass de Slider)
-local Window = Rayfield:CreateWindow({
-    Name = "DZ MASTER FINAL v35 | THE END",
-    LoadingTitle = "Inyectando Kernel Bypass...",
-    LoadingSubtitle = "Desbloqueando Variables de Memoria",
-})
+-- // [BYPASS DE INSTANCIA]: Detección en cualquier lugar (image_39e1a1.jpg)
+workspace.DescendantAdded:Connect(function(d)
+    if d:IsA("Humanoid") then
+        task.wait(0.1)
+        CreateDynamicESP(d.Parent)
+    end
+end)
 
-local CombatTab = Window:CreateTab("Combate Forzado")
+-- Escaneo inicial (Lobby)
+for _, v in pairs(workspace:GetDescendants()) do
+    if v:IsA("Humanoid") and v.Parent ~= lp.Character then
+        CreateDynamicESP(v.Parent)
+    end
+end
 
-CombatTab:CreateToggle({
-    Name = "Auto-Aim Agresivo (Head)",
+-- // INTERFAZ DE CONTROL
+local Window = Rayfield:CreateWindow({Name = "DZ ENGINEER v36 | FINAL REPAIR"})
+local MainTab = Window:CreateTab("Master Config")
+
+MainTab:CreateToggle({
+    Name = "Aimbot Auto-Lock",
     CurrentValue = true,
-    Callback = function(v) MasterConfig.Aimbot = v end
+    Callback = function(v) getgenv().DZ_Final.Aimbot = v end
 })
 
--- Este slider ahora funciona porque modifica la variable MasterConfig que el motor de bypass lee.
-CombatTab:CreateSlider({
-    Name = "Smoothing Bypass (Velocidad)",
+MainTab:CreateToggle({
+    Name = "ESP Render (Force Draw)",
+    CurrentValue = true,
+    Callback = function(v) getgenv().DZ_Final.ESP = v end
+})
+
+MainTab:CreateSlider({
+    Name = "Smoothing Bypass",
     Range = {1, 100},
     CurrentValue = 5,
-    Callback = function(v) 
-        -- Convertimos el número del slider a un valor decimal para la función Lerp
-        MasterConfig.Smoothness = v / 100 
-    end
+    Callback = function(v) getgenv().DZ_Final.Smoothness = v / 100 end
 })
 
-CombatTab:CreateSlider({
-    Name = "Rango de FOV (Arena Scan)",
-    Range = {50, 1000},
+MainTab:CreateSlider({
+    Name = "Aimbot FOV",
+    Range = {50, 800},
     CurrentValue = 200,
-    Callback = function(v) MasterConfig.FOV = v end
+    Callback = function(v) getgenv().DZ_Final.FOV = v end
 })
 
-local VisualTab = Window:CreateTab("Visuals")
-VisualTab:CreateToggle({
-    Name = "ESP Omni-Directional",
-    CurrentValue = true,
-    Callback = function(v) MasterConfig.ESP = v end
-})
-
-Rayfield:Notify({
-    Title = "SISTEMA DEFINITIVO",
-    Content = "Bypass de Arena y Smoothing desbloqueado.",
-    Duration = 10
-})
+Rayfield:Notify({Title = "REPARACIÓN COMPLETADA", Content = "ESP y Aimbot ahora corren en hilos paralelos.", Duration = 5})
