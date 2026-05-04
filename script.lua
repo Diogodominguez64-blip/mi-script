@@ -1,8 +1,7 @@
 --[[
-    DZ HUB v5.0 - MASTER UNIVERSAL EDITION
-    - RE-ENGINEERED COMBAT: Aggressive Aimbot with direct CFrame Injection.
-    - RE-ENGINEERED VISUALS: Persistent Highlights with Team-Aware Logic.
-    - RE-ENGINEERED MOVEMENT: Physics-Stabilized Flight.
+    DZ HUB v6.0 - FPS LAUNCH MASTER EDITION
+    Focus: FPS Launch (Universal Compatibility + Map Persistence)
+    Referencing: "aimbot code from video_2.txt", "Prompt for RB hack 3.rtf"
 ]]
 
 local TweenService = game:GetService("TweenService")
@@ -13,225 +12,174 @@ local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 
 --------------------------------------------------------------------------------
--- 1. MASTER KEY SYSTEM (v5.0)[cite: 3]
+-- 1. SECURE KEY SYSTEM (v6.0)[cite: 3]
 --------------------------------------------------------------------------------
 local function LaunchKeySystem(onSuccess)
     local Screen = Instance.new("ScreenGui", LocalPlayer.PlayerGui)
     local Main = Instance.new("Frame", Screen)
     Main.Size = UDim2.new(0, 320, 0, 240)
     Main.Position = UDim2.new(0.5, -160, 0.5, -120)
-    Main.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
+    Main.BackgroundColor3 = Color3.fromRGB(5, 5, 5)
     
     local UIStroke = Instance.new("UIStroke", Main)
     UIStroke.Color = Color3.fromRGB(130, 0, 255)
     UIStroke.Thickness = 3
 
     local Title = Instance.new("TextLabel", Main)
-    Title.Text = "DZ HUB v5.0 | MASTER LOGIN"
+    Title.Text = "DZ HUB v6.0 | FPS SPECIALIST"
     Title.Size = UDim2.new(1, 0, 0, 60)
     Title.TextColor3 = Color3.fromRGB(130, 0, 255)
     Title.Font = Enum.Font.Code
-    Title.TextSize = 22
+    Title.TextSize = 20
     Title.BackgroundTransparency = 1
 
     local Input = Instance.new("TextBox", Main)
     Input.PlaceholderText = "Key: DZ_2026"
     Input.Size = UDim2.new(0.8, 0, 0, 45)
     Input.Position = UDim2.new(0.1, 0, 0.4, 0)
-    Input.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    Input.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
     Input.TextColor3 = Color3.new(1,1,1)
 
     local Verify = Instance.new("TextButton", Main)
-    Verify.Text = "INITIALIZE ENGINE"
+    Verify.Text = "DEPLOY HUB"
     Verify.Size = UDim2.new(0.8, 0, 0, 50)
     Verify.Position = UDim2.new(0.1, 0, 0.7, 0)
     Verify.BackgroundColor3 = Color3.fromRGB(130, 0, 255)
     Verify.TextColor3 = Color3.new(1,1,1)
 
     Verify.MouseButton1Click:Connect(function()
-        if Input.Text == "DZ_2026" then
-            Screen:Destroy()
-            onSuccess()
-        else
-            Input.Text = "ACCESS DENIED"
-            task.wait(1)
-            Input.Text = ""
-        end
+        if Input.Text == "DZ_2026" then Screen:Destroy(); onSuccess() end
     end)
 end
 
 --------------------------------------------------------------------------------
--- 2. UNIVERSAL ENGINE INITIALIZATION
+-- 2. FPS LAUNCH OPTIMIZED ENGINE
 --------------------------------------------------------------------------------
 local function InitializeHub()
     local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
     local Window = Rayfield:CreateWindow({
-        Name = "DZ HUB v5.0",
-        LoadingTitle = "Master Engine Initializing...",
-        LoadingSubtitle = "Universal Compatibility Mode"
+        Name = "DZ HUB v6.0",
+        LoadingTitle = "Initializing FPS Suite...",
+        LoadingSubtitle = "Optimized for FPS Launch"
     })
 
     getgenv().DZ_Config = {
         Aimbot = false, Aggressive = false, ShowFOV = false, FOV = 250,
-        TeamCheck = true, ESP = false, Fly = false, FlySpeed = 50
+        TeamCheck = true, ESP = false, Fly = false, FlySpeed = 60, WallCheck = true
     }
 
-    -- FOV Rendering Setup[cite: 3]
     local FOVCircle = Drawing.new("Circle")
     FOVCircle.Thickness = 1
     FOVCircle.Color = Color3.fromRGB(130, 0, 255)
-    FOVCircle.Transparency = 1
-    FOVCircle.Visible = false
 
-    -- Universal Target Finder[cite: 5]
-    local function GetUniversalTarget()
-        local BestTarget = nil
-        local MaxDist = getgenv().DZ_Config.FOV
-        local MouseLocation = UserInputService:GetMouseLocation()
+    -- Universal FPS Target Finder[cite: 4, 5]
+    local function GetFPSTarget()
+        local Target = nil
+        local Dist = getgenv().DZ_Config.FOV
+        local Mouse = UserInputService:GetMouseLocation()
 
-        for _, player in pairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character then
-                local char = player.Character
-                local head = char:FindFirstChild("Head") or char:FindFirstChildWhichIsA("Part")
-                local hum = char:FindFirstChildOfClass("Humanoid")
-
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character then
+                local head = p.Character:FindFirstChild("Head") or p.Character:FindFirstChildWhichIsA("BasePart")
+                local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                
                 if head and hum and hum.Health > 0 then
-                    if not getgenv().DZ_Config.TeamCheck or player.Team ~= LocalPlayer.Team then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
-                        if onScreen then
-                            local dist = (Vector2.new(screenPos.X, screenPos.Y) - MouseLocation).Magnitude
-                            if dist < MaxDist then
-                                MaxDist = dist
-                                BestTarget = head
+                    if not getgenv().DZ_Config.TeamCheck or p.Team ~= LocalPlayer.Team then
+                        local pos, vis = Camera:WorldToViewportPoint(head.Position)
+                        if vis then
+                            -- Wall Check Implementation[cite: 5]
+                            local obs = Camera:GetPartsObscuringTarget({head.Position}, {LocalPlayer.Character, p.Character})
+                            if not getgenv().DZ_Config.WallCheck or #obs == 0 then
+                                local mag = (Vector2.new(pos.X, pos.Y) - Mouse).Magnitude
+                                if mag < Dist then Dist = mag; Target = head end
                             end
                         end
                     end
                 end
             end
         end
-        return BestTarget
+        return Target
     end
 
     ----------------------------------------------------------------------------
-    -- TAB 1: MAIN (COMBAT ENGINE)[cite: 1, 5]
+    -- TAB 1: MAIN (COMBAT)[cite: 1, 5]
     ----------------------------------------------------------------------------
     local MainTab = Window:CreateTab("Main")
-    
-    MainTab:CreateToggle({
-        Name = "Master Aimbot (Key: E)",
-        CurrentValue = false,
-        Callback = function(v) getgenv().DZ_Config.Aimbot = v end
-    })
-
-    MainTab:CreateToggle({
-        Name = "Aggressive Snapping",
-        CurrentValue = false,
-        Callback = function(v) getgenv().DZ_Config.Aggressive = v end
-    })
-
-    MainTab:CreateToggle({
-        Name = "Render FOV Circle",
-        CurrentValue = false,
-        Callback = function(v) getgenv().DZ_Config.ShowFOV = v end
-    })
-
-    MainTab:CreateSlider({
-        Name = "FOV Radius",
-        Range = {50, 800},
-        Increment = 10,
-        CurrentValue = 250,
-        Callback = function(v) getgenv().DZ_Config.FOV = v end
-    })
+    MainTab:CreateToggle({Name = "Aimbot (Hold E)", Callback = function(v) getgenv().DZ_Config.Aimbot = v end})
+    MainTab:CreateToggle({Name = "Aggressive Mode", Callback = function(v) getgenv().DZ_Config.Aggressive = v end})
+    MainTab:CreateToggle({Name = "Wall Check", CurrentValue = true, Callback = function(v) getgenv().DZ_Config.WallCheck = v end})
+    MainTab:CreateToggle({Name = "Show FOV", Callback = function(v) getgenv().DZ_Config.ShowFOV = v end})
+    MainTab:CreateSlider({Name = "FOV Radius", Range = {50, 800}, CurrentValue = 250, Callback = function(v) getgenv().DZ_Config.FOV = v end})
 
     ----------------------------------------------------------------------------
-    -- TAB 2: VISUALS (UNIVERSAL ESP)[cite: 5]
+    -- TAB 2: VISUALS (MAP-AWARE ESP)[cite: 5]
     ----------------------------------------------------------------------------
     local VisualsTab = Window:CreateTab("Visuals")
-    
-    VisualsTab:CreateToggle({
-        Name = "Universal Player ESP",
-        CurrentValue = false,
-        Callback = function(v) getgenv().DZ_Config.ESP = v end
-    })
+    VisualsTab:CreateToggle({Name = "Universal ESP Highlights", Callback = function(v) getgenv().DZ_Config.ESP = v end})
 
-    -- Universal Persistence Loop[cite: 5]
-    RunService.RenderStepped:Connect(function()
+    -- Map Transition Monitor[cite: 5]
+    RunService.Heartbeat:Connect(function()
         for _, p in pairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character then
-                local isValid = getgenv().DZ_Config.ESP and (not getgenv().DZ_Config.TeamCheck or p.Team ~= LocalPlayer.Team)
-                local highlight = p.Character:FindFirstChild("DZ_MASTER_ESP")
-                
-                if isValid then
-                    if not highlight then
-                        highlight = Instance.new("Highlight", p.Character)
-                        highlight.Name = "DZ_MASTER_ESP"
-                        highlight.FillColor = Color3.fromRGB(130, 0, 255)
+                local h = p.Character:FindFirstChild("DZ_v6_Highlight")
+                if getgenv().DZ_Config.ESP and (not getgenv().DZ_Config.TeamCheck or p.Team ~= LocalPlayer.Team) then
+                    if not h then
+                        h = Instance.new("Highlight", p.Character)
+                        h.Name = "DZ_v6_Highlight"
+                        h.FillColor = Color3.fromRGB(130, 0, 255)
                     end
-                    highlight.Enabled = true
-                elseif highlight then
-                    highlight.Enabled = false
-                end
+                    h.Enabled = true
+                elseif h then h.Enabled = false end
             end
         end
     end)
 
     ----------------------------------------------------------------------------
-    -- TAB 3: EXTRAS (MOVEMENT)[cite: 3]
+    -- TAB 3: EXTRAS (FPS MOVEMENT)[cite: 3]
     ----------------------------------------------------------------------------
     local ExtrasTab = Window:CreateTab("Extras")
-
     ExtrasTab:CreateToggle({
-        Name = "Master Fly Mechanic",
-        CurrentValue = false,
-        Callback = function(Value)
-            getgenv().DZ_Config.Fly = Value
-            local Char = LocalPlayer.Character
-            if not Char or not Char:FindFirstChild("HumanoidRootPart") then return end
-            
-            if Value then
+        Name = "Fixed Fly (Stabilized)",
+        Callback = function(v)
+            getgenv().DZ_Config.Fly = v
+            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not root then return end
+            if v then
                 task.spawn(function()
-                    local Root = Char.HumanoidRootPart
-                    local BV = Instance.new("BodyVelocity", Root)
-                    BV.Name = "DZ_Master_Velocity"
-                    BV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-                    
+                    local bv = Instance.new("BodyVelocity", root)
+                    bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
                     while getgenv().DZ_Config.Fly do
-                        BV.Velocity = Camera.CFrame.LookVector * getgenv().DZ_Config.FlySpeed
+                        bv.Velocity = Camera.CFrame.LookVector * getgenv().DZ_Config.FlySpeed
                         task.wait()
                     end
-                    BV:Destroy()
-                    Root.Velocity = Vector3.zero -- Physics Stabilization[cite: 3]
+                    bv:Destroy()
+                    root.Velocity = Vector3.zero -- Fixed Stop[cite: 3]
                 end)
             else
-                Char.HumanoidRootPart.Velocity = Vector3.zero -- Physics Stabilization[cite: 3]
+                root.Velocity = Vector3.zero -- Fixed Stop[cite: 3]
             end
-        end,
+        end
     })
 
     ----------------------------------------------------------------------------
-    -- UNIVERSAL COMBAT RUNTIME[cite: 4, 5]
+    -- RUNTIME EXECUTION[cite: 4, 5]
     ----------------------------------------------------------------------------
     RunService.RenderStepped:Connect(function()
-        -- FOV Management
         FOVCircle.Visible = getgenv().DZ_Config.ShowFOV
         FOVCircle.Position = UserInputService:GetMouseLocation()
         FOVCircle.Radius = getgenv().DZ_Config.FOV
 
-        -- Aimbot Logic Execution
         if getgenv().DZ_Config.Aimbot and UserInputService:IsKeyDown(Enum.KeyCode.E) then
-            local Target = GetUniversalTarget()
-            if Target then
-                local TargetCF = CFrame.new(Camera.CFrame.Position, Target.Position)
-                if getgenv().DZ_Config.Aggressive then
-                    Camera.CFrame = TargetCF -- Instant Snap[cite: 5]
-                else
-                    Camera.CFrame = Camera.CFrame:Lerp(TargetCF, 0.2) -- Master Smooth[cite: 5]
-                end
+            local target = GetFPSTarget()
+            if target then
+                local cf = CFrame.new(Camera.CFrame.Position, target.Position)
+                if getgenv().DZ_Config.Aggressive then Camera.CFrame = cf 
+                else Camera.CFrame = Camera.CFrame:Lerp(cf, 0.2) end
             end
         end
     end)
 
-    Rayfield:Notify({Title = "DZ HUB v5.0", Content = "Universal Master Engine Active", Duration = 5})
+    Rayfield:Notify({Title = "DZ HUB v6.0", Content = "FPS Launch Mode Engaged", Duration = 5})
 end
 
 LaunchKeySystem(InitializeHub)
