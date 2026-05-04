@@ -37,11 +37,11 @@ local Theme = {
 --------------------------------------------------------------------------------
 local function CreateGUI()
     if LocalPlayer.PlayerGui:FindFirstChild("ENIGMA_TEAM_FIX") then
-        LocalPlayer.PlayerGui.DZ_TEAM_FIX:Destroy()
+        LocalPlayer.PlayerGui.ENIGMA_TEAM_FIX:Destroy()
     end
 
     local Screen = Instance.new("ScreenGui")
-    Screen.Name = "DZ_TEAM_FIX"
+    Screen.Name = "ENIGMA_TEAM_FIX"
     Screen.ResetOnSpawn = false
     Screen.ZIndexBehavior = Enum.ZIndexBehavior.Global 
     Screen.Parent = LocalPlayer:WaitForChild("PlayerGui")
@@ -66,7 +66,7 @@ local function CreateGUI()
 
     -- HEADER
     local Header = Instance.new("TextLabel")
-    Header.Text = "DZ v12 :: TEAM FIX"
+    Header.Text = "ENIGMA v12 :: TEAM FIX"
     Header.Size = UDim2.new(1, 0, 0, 50)
     Header.BackgroundTransparency = 1
     Header.TextColor3 = Theme.Purple
