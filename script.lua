@@ -1,127 +1,139 @@
 --[[
-    DZ HUB v11.0 - FIX DEPLOY & STALE REFERENCE
-    SOLUCIÓN: 
-    - Escaneo dinámico de Workspace para detectar personajes tras el 'Deploy'.
-    - ESP de Caja (Box) robusto que se redibuja si el personaje cambia.
-    - Aimbot con validación de existencia de objetivo.
+    DZ HUB v12.0 - SUPREMACÍA VISUAL
+    FIX: ESP Drawing 2D (Funciona post-deploy y en lobby).
+    NUEVAS FUNCIONES: Box ESP, Snaplines (Líneas), y Nombres.
 ]]
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local Camera = workspace.CurrentCamera
 
--- Configuración Global
+-- Configuración Avanzada
 getgenv().DZ_Config = {
-    Aimbot_Tracking = true,
-    SilentAim = true,
-    ESP_Box = true,
+    ESP_Enabled = true,
+    ESP_Boxes = true,
+    ESP_Lines = true,
+    ESP_Names = true,
     TeamCheck = true,
-    FOV_Radius = 250,
+    SilentAim = true,
+    FOV_Radius = 200,
     Show_FOV = true
 }
 
--- FIX: Círculo de FOV centrado dinámicamente[cite: 5]
+-- FOV FIX (Centrado y funcional)[cite: 5]
 local FOVCircle = Drawing.new("Circle")
-FOVCircle.Thickness = 2
+FOVCircle.Thickness = 1
 FOVCircle.Color = Color3.fromRGB(130, 0, 255)
 FOVCircle.Transparency = 1
 
--- SISTEMA DE ESCANEO DINÁMICO (El Fix para el Deploy)[cite: 5]
-local function GetValidTarget()
-    local Target, BestDist = nil, getgenv().DZ_Config.FOV_Radius
-    local Center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+-- SISTEMA DE DIBUJO ESP (EL FIX DEFINITIVO)[cite: 5]
+local function CreateESP(Player)
+    local Box = Drawing.new("Square")
+    local Line = Drawing.new("Line")
+    local Name = Drawing.new("Text")
 
-    -- Buscamos en todo el Workspace para no perder el rastro tras el Deploy
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then
-            -- Intentamos encontrar el personaje vivo, sin importar dónde esté en el Workspace
-            local char = p.Character
-            if char and char:FindFirstChildOfClass("Humanoid") and char:FindFirstChildOfClass("Humanoid").Health > 0 then
-                if not getgenv().DZ_Config.TeamCheck or p.Team ~= LocalPlayer.Team then
-                    local hitPart = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
+    local function Update()
+        local Connection
+        Connection = RunService.RenderStepped:Connect(function()
+            if Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") and Player.Character:FindFirstChildOfClass("Humanoid").Health > 0 then
+                local RootPart = Player.Character.HumanoidRootPart
+                local Pos, OnScreen = Camera:WorldToViewportPoint(RootPart.Position)
+                
+                -- Verificación de Equipo[cite: 5]
+                local IsEnemy = not getgenv().DZ_Config.TeamCheck or Player.Team ~= LocalPlayer.Team
+
+                if OnScreen and getgenv().DZ_Config.ESP_Enabled and IsEnemy then
+                    -- Calculo de tamaño de caja basado en distancia[cite: 5]
+                    local Size = (Camera:WorldToViewportPoint(RootPart.Position - Vector3.new(0, 3, 0)).Y - Camera:WorldToViewportPoint(RootPart.Position + Vector3.new(0, 2.6, 0)).Y)
                     
-                    if hitPart then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(hitPart.Position)
-                        if onScreen then
-                            local dist = (Vector2.new(screenPos.X, screenPos.Y) - Center).Magnitude
-                            if dist < BestDist then
-                                BestDist = dist
-                                Target = hitPart
-                            end
-                        end
-                    end
+                    -- Configurar Caja
+                    Box.Visible = getgenv().DZ_Config.ESP_Boxes
+                    Box.Size = Vector2.new(Size * 0.7, Size)
+                    Box.Position = Vector2.new(Pos.X - Box.Size.X / 2, Pos.Y - Box.Size.Y / 2)
+                    Box.Color = Color3.fromRGB(255, 0, 0)
+                    Box.Thickness = 1
+
+                    -- Configurar Líneas (Snaplines)
+                    Line.Visible = getgenv().DZ_Config.ESP_Lines
+                    Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                    Line.To = Vector2.new(Pos.X, Pos.Y + (Size/2))
+                    Line.Color = Color3.fromRGB(255, 255, 255)
+
+                    -- Configurar Nombres
+                    Name.Visible = getgenv().DZ_Config.ESP_Names
+                    Name.Text = Player.Name
+                    Name.Position = Vector2.new(Pos.X, Pos.Y - (Size/2) - 15)
+                    Name.Color = Color3.new(1, 1, 1)
+                    Name.Center = true
+                    Name.Outline = true
+                else
+                    Box.Visible = false
+                    Line.Visible = false
+                    Name.Visible = false
                 end
+            else
+                Box.Visible = false
+                Line.Visible = false
+                Name.Visible = false
+                if not Player.Parent then Connection:Disconnect() end
             end
-        end
+        end)
     end
-    return Target
+    coroutine.wrap(Update)()
 end
 
--- INTERFAZ RAYFIELD (Optimizada)
+-- Inicializar ESP para todos[cite: 5]
+for _, p in pairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then CreateESP(p) end
+end
+Players.PlayerAdded:Connect(function(p) CreateESP(p) end)
+
+-- UI MASTER (Rayfield)[cite: 1]
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
-    Name = "DZ HUB v11.0 | FIX DEPLOY",
-    LoadingTitle = "Reconstruyendo Enlaces de Memoria...",
-    LoadingSubtitle = "Listo para FPS Lanzamiento"
+    Name = "DZ HUB v12.0 | ESP UNLIMITED",
+    LoadingTitle = "Bypassing FPS Lanzamiento...",
+    LoadingSubtitle = "Master Script"
 })
 
-local MainTab = Window:CreateTab("Combate")
-MainTab:CreateToggle({Name = "Aimbot Tracking (Click Derecho)", Callback = function(v) getgenv().DZ_Config.Aimbot_Tracking = v end})
-MainTab:CreateToggle({Name = "Silent Aim (Metamethod)", Callback = function(v) getgenv().DZ_Config.SilentAim = v end})
-MainTab:CreateSlider({Name = "Radio FOV", Range = {50, 800}, CurrentValue = 250, Callback = function(v) getgenv().DZ_Config.FOV_Radius = v end})
-MainTab:CreateToggle({Name = "Mostrar FOV", Callback = function(v) getgenv().DZ_Config.Show_FOV = v end})
+local CombatTab = Window:CreateTab("Combate")
+CombatTab:CreateToggle({Name = "Silent Aim", Callback = function(v) getgenv().DZ_Config.SilentAim = v end})
+CombatTab:CreateSlider({Name = "FOV Radius", Range = {50, 800}, CurrentValue = 200, Callback = function(v) getgenv().DZ_Config.FOV_Radius = v end})
+CombatTab:CreateToggle({Name = "Show FOV", Callback = function(v) getgenv().DZ_Config.Show_FOV = v end})
 
 local VisualsTab = Window:CreateTab("Visuales")
-VisualsTab:CreateToggle({Name = "Box ESP (Persistente)", Callback = function(v) getgenv().DZ_Config.ESP_Box = v end})
+VisualsTab:CreateToggle({Name = "Activar ESP", CurrentValue = true, Callback = function(v) getgenv().DZ_Config.ESP_Enabled = v end})
+VisualsTab:CreateToggle({Name = "Cajas (Boxes)", CurrentValue = true, Callback = function(v) getgenv().DZ_Config.ESP_Boxes = v end})
+VisualsTab:CreateToggle({Name = "Líneas (Lines)", CurrentValue = true, Callback = function(v) getgenv().DZ_Config.ESP_Lines = v end})
+VisualsTab:CreateToggle({Name = "Nombres", CurrentValue = true, Callback = function(v) getgenv().DZ_Config.ESP_Names = v end})
 
--- BUCLE PRINCIPAL DE RENDERIZADO[cite: 5]
+-- BUCLE DE ACTUALIZACIÓN FOV Y AIMBOT[cite: 2, 5]
 RunService.RenderStepped:Connect(function()
     FOVCircle.Visible = getgenv().DZ_Config.Show_FOV
-    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     FOVCircle.Radius = getgenv().DZ_Config.FOV_Radius
-
-    -- Lógica de ESP de Caja (Highlight para máxima visibilidad tras Deploy)[cite: 5]
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then
-            local highlight = p.Character:FindFirstChild("DZ_BOX")
-            local isEnemy = not getgenv().DZ_Config.TeamCheck or p.Team ~= LocalPlayer.Team
-            
-            if getgenv().DZ_Config.ESP_Box and isEnemy and p.Character:FindFirstChildOfClass("Humanoid").Health > 0 then
-                if not highlight then
-                    highlight = Instance.new("Highlight", p.Character)
-                    highlight.Name = "DZ_BOX"
-                    highlight.FillColor = Color3.fromRGB(255, 0, 0)
-                    highlight.OutlineColor = Color3.new(1,1,1)
-                    highlight.FillAlpha = 0.5
-                end
-                highlight.Enabled = true
-            elseif highlight then
-                highlight.Enabled = false
-            end
-        end
-    end
-
-    -- Tracking Aimbot mejorado con validación de objetivo[cite: 5]
-    if getgenv().DZ_Config.Aimbot_Tracking and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-        local target = GetValidTarget()
-        if target then
-            Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, target.Position), 0.2)
-        end
-    end
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 end)
 
--- SILENT AIM (METAMETHOD BYPASS)[cite: 2]
 local OldIndex
 OldIndex = hookmetamethod(game, "__index", function(Self, Key)
     if not checkcaller() and getgenv().DZ_Config.SilentAim and Key == "Hit" and Self:IsA("Mouse") then
-        local target = GetValidTarget()
-        if target then
-            return target.CFrame
+        -- Lógica de búsqueda de objetivo integrada
+        local Target, BestDist = nil, getgenv().DZ_Config.FOV_Radius
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Head") then
+                local Pos, OnScreen = Camera:WorldToViewportPoint(p.Character.Head.Position)
+                local Dist = (Vector2.new(Pos.X, Pos.Y) - Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)).Magnitude
+                if OnScreen and Dist < BestDist then
+                    BestDist = Dist
+                    Target = p.Character.Head
+                end
+            end
         end
+        if Target then return Target.CFrame end
     end
     return OldIndex(Self, Key)
 end)
 
-Rayfield:Notify({Title = "DZ HUB v11.0", Content = "Fix de Deploy aplicado. Funcional en combate.", Duration = 5})
+Rayfield:Notify({Title = "DZ HUB v12.0", Content = "ESP de Dibujo 2D Activado. Funcional tras Deploy.", Duration = 5})
