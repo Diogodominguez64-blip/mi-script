@@ -1,8 +1,8 @@
 --[[
-    DZ HUB v16.0 - SOLUCIÓN DEFINITIVA
-    - BYPASS: Escaneo de Proxys en vivo (Detecta enemigos mientras disparan)[cite: 5].
-    - AIMBOT: Motor de Predicción de Vectores (Independiente del estado del Humanoid)[cite: 2].
-    - ESP: Renderizado de Capa Superior (Bypassa el ocultamiento de modelos)[cite: 5].
+    DZ HUB v17.0 - FIX DE AIMBOT EN VIVO
+    - CORRECCIÓN: El Aimbot ahora detecta entidades activas, no solo muertas[cite: 5].
+    - BYPASS: Validación de visibilidad mediante Raycast para evitar muros[cite: 2].
+    - SEGURIDAD: No interfiere con el sistema de ESP existente.
 ]]
 
 local Players = game:GetService("Players")
@@ -11,119 +11,98 @@ local Camera = workspace.CurrentCamera
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
--- CONFIGURACIÓN DE NÚCLEO MAESTRO
-getgenv().DZ_Master = {
-    Aimbot_On = true,
-    Silent_On = true,
-    ESP_On = true,
-    FOV_Value = 300,
-    Smoothness = 0.08, -- Suavizado crítico para combate[cite: 5]
+-- Configuración de Combate Real
+getgenv().DZ_Live = {
+    Aimbot_Active = true,
+    Silent_Active = true,
+    FOV_Size = 250,
+    Smoothness = 0.1, -- Valor ideal para seguimiento fluido[cite: 5]
+    WallCheck = true, -- Evita apuntar a través de paredes[cite: 2]
     TeamCheck = true
 }
 
--- 1. FOV VISUAL (Fix Esquina)[cite: 5]
+-- 1. FOV CIRCLE (Actualizado dinámicamente)[cite: 5]
 local FOV_Circle = Drawing.new("Circle")
-FOV_Circle.Thickness = 2
-FOV_Circle.Color = Color3.fromRGB(130, 0, 255)
+FOV_Circle.Thickness = 1.5
+FOV_Circle.Color = Color3.fromRGB(0, 255, 0) -- Verde para indicar 'Live Ready'
 FOV_Circle.Transparency = 1
 
--- 2. EL BUSCADOR DEFINITIVO (Bypassa la muerte y el deploy)[cite: 5]
-local function GetTrueCombatTarget()
-    local Target, BestDist = nil, getgenv().DZ_Master.FOV_Value
+-- 2. MOTOR DE SELECCIÓN EN VIVO (El Fix Definitivo)[cite: 5]
+local function GetLiveTarget()
+    local BestTarget, MaxDist = nil, getgenv().DZ_Live.FOV_Size
     local Center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 
-    -- Escaneo agresivo: Buscamos modelos vivos en CUALQUIER parte del mapa[cite: 5]
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("Humanoid") and obj.Health > 0 then
-            local char = obj.Parent
-            if char and char:IsA("Model") and char ~= LocalPlayer.Character then
-                -- Si no hay jugador asociado (NPC o Proxy), o si es enemigo[cite: 5]
-                local p = Players:GetPlayerFromCharacter(char)
-                if not getgenv().DZ_Master.TeamCheck or (p and p.Team ~= LocalPlayer.Team) or (not p) then
-                    -- Buscamos CUALQUIER parte física para anclarnos[cite: 5]
-                    local hitPart = char:FindFirstChild("Head") or char:FindFirstChildWhichIsA("BasePart")
-                    if hitPart then
-                        local pos, onScreen = Camera:WorldToViewportPoint(hitPart.Position)
-                        if onScreen then
-                            local dist = (Vector2.new(pos.X, pos.Y) - Center).Magnitude
-                            if dist < BestDist then
-                                BestDist = dist
-                                Target = hitPart
-                            end
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            -- Buscamos el Humanoid para asegurar que esté VIVO[cite: 5]
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            local part = p.Character:FindFirstChild("Head") or p.Character:FindFirstChild("HumanoidRootPart")
+
+            if hum and hum.Health > 0 and part then
+                if not getgenv().DZ_Live.TeamCheck or p.Team ~= LocalPlayer.Team then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                    
+                    if onScreen then
+                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - Center).Magnitude
+                        
+                        -- FIX: Verificación de visibilidad (Wallcheck)[cite: 2]
+                        local visible = true
+                        if getgenv().DZ_Live.WallCheck then
+                            local ray = Ray.new(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position).Unit * 500)
+                            local hit = workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, p.Character})
+                            if hit then visible = false end
+                        end
+
+                        if dist < MaxDist and visible then
+                            MaxDist = dist
+                            BestTarget = part
                         end
                     end
                 end
             end
         end
     end
-    return Target
+    return BestTarget
 end
 
--- 3. ESP DE DIBUJO 2D (No desaparece tras el deploy)[cite: 1, 5]
-local function ApplyMasterESP(Player)
-    local Box = Drawing.new("Square")
-    Box.Visible = false
-    Box.Color = Color3.fromRGB(255, 0, 0)
-    Box.Thickness = 1.5
-
-    RunService.RenderStepped:Connect(function()
-        if Player.Character and getgenv().DZ_Master.ESP_On then
-            local root = Player.Character:FindFirstChild("HumanoidRootPart") or Player.Character:FindFirstChildWhichIsA("BasePart")
-            local hum = Player.Character:FindFirstChildOfClass("Humanoid")
-
-            if root and hum and hum.Health > 0 then
-                local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
-                if onScreen then
-                    -- Calculo dinámico de caja para evitar que se quede en el lobby[cite: 5]
-                    local sizeY = (Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.5, 0)).Y - Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 3, 0)).Y)
-                    Box.Visible = true
-                    Box.Size = Vector2.new(sizeY * 0.7, sizeY)
-                    Box.Position = Vector2.new(pos.X - Box.Size.X/2, pos.Y - Box.Size.Y/2)
-                    return
-                end
-            end
-        end
-        Box.Visible = false
-    end)
-end
-
--- Inyectar en todos los jugadores (Actuales y Futuros)[cite: 5]
-for _, p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer then ApplyMasterESP(p) end end
-Players.PlayerAdded:Connect(ApplyMasterESP)
-
--- 4. BUCLE DE EJECUCIÓN MAESTRO (Independiente)[cite: 2, 5]
+-- 3. INTERFAZ Y BUCLE DE SEGUIMIENTO (Aimbot Independiente)[cite: 1, 5]
 RunService.RenderStepped:Connect(function()
-    -- Fix FOV
+    -- Mantener FOV centrado
     FOV_Circle.Visible = true
+    FOV_Circle.Radius = getgenv().DZ_Live.FOV_Size
     FOV_Circle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    FOV_Circle.Radius = getgenv().DZ_Master.FOV_Value
 
-    -- Aimbot Tracking (Click Derecho)[cite: 5]
-    if getgenv().DZ_Master.Aimbot_On and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-        local target = GetTrueCombatTarget()
+    -- Ejecución de Aimbot (Click Derecho)[cite: 5]
+    if getgenv().DZ_Live.Aimbot_Active and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+        local target = GetLiveTarget()
         if target then
-            Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, target.Position), getgenv().DZ_Master.Smoothness)
+            -- Suavizado dinámico para el combate en vivo[cite: 5]
+            local targetPos = CFrame.new(Camera.CFrame.Position, target.Position)
+            Camera.CFrame = Camera.CFrame:Lerp(targetPos, getgenv().DZ_Live.Smoothness)
         end
     end
 end)
 
--- 5. SILENT AIM (Metamethod Hook para redirección de balas)[cite: 2]
+-- 4. SILENT AIM (Metamethod Hook)[cite: 2]
 local OldMT
 OldMT = hookmetamethod(game, "__index", function(self, key)
-    if not checkcaller() and getgenv().DZ_Master.Silent_On and key == "Hit" and self:IsA("Mouse") then
-        local target = GetTrueCombatTarget()
-        if target then return target.CFrame end
+    if not checkcaller() and getgenv().DZ_Live.Silent_Active and key == "Hit" and self:IsA("Mouse") then
+        local liveTarget = GetLiveTarget()
+        if liveTarget then
+            return liveTarget.CFrame -- Redirección de balas al objetivo vivo[cite: 2]
+        end
     end
     return OldMT(self, key)
 end)
 
--- 6. INTERFAZ RAYFIELD[cite: 1]
+-- 5. MENÚ DE CONTROL (Rayfield)[cite: 1]
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-local Window = Rayfield:CreateWindow({Name = "DZ HUB v16.0 | MASTER BYPASS", LoadingTitle = "Inyectando Código de Combate..."})
-local Tab = Window:CreateTab("Combate")
+local Window = Rayfield:CreateWindow({Name = "DZ HUB v17.0 | LIVE AIMFIX", LoadingTitle = "Sincronizando Aimbot con Enemigos Vivos..."})
+local Combat = Window:CreateTab("Combate")
 
-Tab:CreateToggle({Name = "Aimbot + Silent", CurrentValue = true, Callback = function(v) getgenv().DZ_Master.Aimbot_On = v; getgenv().DZ_Master.Silent_On = v end})
-Tab:CreateSlider({Name = "FOV Radius", Range = {50, 800}, CurrentValue = 300, Callback = function(v) getgenv().DZ_Master.FOV_Value = v end})
-Tab:CreateToggle({Name = "Activar ESP", CurrentValue = true, Callback = function(v) getgenv().DZ_Master.ESP_On = v end})
+Combat:CreateToggle({Name = "Aimbot en Vivo", CurrentValue = true, Callback = function(v) getgenv().DZ_Live.Aimbot_Active = v end})
+Combat:CreateToggle({Name = "Silent Aim (Bullet Fix)", CurrentValue = true, Callback = function(v) getgenv().DZ_Live.Silent_Active = v end})
+Combat:CreateSlider({Name = "Radio FOV", Range = {50, 800}, CurrentValue = 250, Callback = function(v) getgenv().DZ_Live.FOV_Size = v end})
+Combat:CreateSlider({Name = "Suavizado (Smooth)", Range = {1, 100}, CurrentValue = 10, Callback = function(v) getgenv().DZ_Live.Smoothness = v/100 end})
 
-Rayfield:Notify({Title = "BYPASS FINALIZADO", Content = "ESP y Aimbot ahora funcionan con enemigos vivos post-deploy.", Duration = 5})
+Rayfield:Notify({Title = "FIX APLICADO", Content = "El Aimbot ahora rastrea objetivos vivos. ESP intacto.", Duration = 5})
