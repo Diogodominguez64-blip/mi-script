@@ -66,7 +66,7 @@ local function CreateGUI()
 
     -- HEADER
     local Header = Instance.new("TextLabel")
-    Header.Text = "ENIGMA v12 :: TEAM FIX"
+    Header.Text = "DZ v12 :: TEAM FIX"
     Header.Size = UDim2.new(1, 0, 0, 50)
     Header.BackgroundTransparency = 1
     Header.TextColor3 = Theme.Purple
