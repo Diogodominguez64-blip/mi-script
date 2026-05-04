@@ -1,174 +1,199 @@
 --[[
-    DZ HUB v1.0 - Educational Simulation
-    Features: Key System, Fixed Fly, Universal ESP, Combat & Farm
+    DZ HUB v1.0
+    Integrated with logic from: 
+    - "Prompt for RB hack.rtf"
+    - "RB havk prompt 2.rtf"
+    - "Prompt for RB hack 3.rtf"
+    - "aimbot code from video.txt"
 ]]
 
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
 
 --------------------------------------------------------------------------------
--- 1. KEY SYSTEM (ENHANCED DESIGN & ANIMATIONS)
+-- 1. KEY SYSTEM (DZ HUB BRANDING)
 --------------------------------------------------------------------------------
-local function StartKeySystem(callback)
-    local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-    ScreenGui.Name = "DZ_KeySystem"
-
-    local MainFrame = Instance.new("Frame", ScreenGui)
-    MainFrame.Size = UDim2.new(0, 0, 0, 0) -- Starts small for animation
-    MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-    MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-    MainFrame.BorderSizePixel = 0
-
-    local UICorner = Instance.new("UICorner", MainFrame)
-    local UIStroke = Instance.new("UIStroke", MainFrame)
-    UIStroke.Color = Color3.fromRGB(130, 0, 255)
-    UIStroke.Thickness = 2
-
-    local Title = Instance.new("TextLabel", MainFrame)
-    Title.Text = "DZ HUB | LOGIN"
-    Title.Size = UDim2.new(1, 0, 0, 40)
-    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Title.BackgroundTransparency = 1
-    Title.Font = Enum.Font.GothamBold
-    Title.TextSize = 18
-
-    local KeyInput = Instance.new("TextBox", MainFrame)
-    KeyInput.PlaceholderText = "Enter Key Here..."
-    KeyInput.Size = UDim2.new(0.8, 0, 0, 40)
-    KeyInput.Position = UDim2.new(0.1, 0, 0.4, 0)
-    KeyInput.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-    KeyInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+local function LaunchKeySystem(onSuccess)
+    local Screen = Instance.new("ScreenGui", LocalPlayer.PlayerGui)
+    local Main = Instance.new("Frame", Screen)
+    Main.Size = UDim2.new(0, 300, 0, 200)
+    Main.Position = UDim2.new(0.5, -150, 0.5, -100)
+    Main.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     
-    local SubmitBtn = Instance.new("TextButton", MainFrame)
-    SubmitBtn.Text = "Verify Key"
-    SubmitBtn.Size = UDim2.new(0.8, 0, 0, 40)
-    SubmitBtn.Position = UDim2.new(0.1, 0, 0.7, 0)
-    SubmitBtn.BackgroundColor3 = Color3.fromRGB(130, 0, 255)
-    SubmitBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    local Title = Instance.new("TextLabel", Main)
+    Title.Text = "DZ HUB | KEY REQUIRED"
+    Title.Size = UDim2.new(1, 0, 0, 50)
+    Title.TextColor3 = Color3.fromRGB(130, 0, 255)
+    Title.BackgroundTransparency = 1
 
-    -- Opening Animation
-    MainFrame:TweenSize(UDim2.new(0, 300, 0, 200), "Out", "Back", 0.5, true)
+    local Input = Instance.new("TextBox", Main)
+    Input.PlaceholderText = "Enter Key..."
+    Input.Size = UDim2.new(0.8, 0, 0, 40)
+    Input.Position = UDim2.new(0.1, 0, 0.35, 0)
+    Input.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    Input.TextColor3 = Color3.new(1,1,1)
 
-    SubmitBtn.MouseButton1Click:Connect(function()
-        if KeyInput.Text == "DZ_2026" then -- Simulation Key
-            MainFrame:TweenPosition(UDim2.new(0.5, 0, 1.5, 0), "In", "Back", 0.5, true)
-            task.wait(0.5)
-            ScreenGui:Destroy()
-            callback()
+    local Verify = Instance.new("TextButton", Main)
+    Verify.Text = "Verify"
+    Verify.Size = UDim2.new(0.8, 0, 0, 40)
+    Verify.Position = UDim2.new(0.1, 0, 0.65, 0)
+    Verify.BackgroundColor3 = Color3.fromRGB(130, 0, 255)
+    Verify.TextColor3 = Color3.new(1,1,1)
+
+    -- Animated Intro[cite: 3]
+    Main.BackgroundTransparency = 1
+    TweenService:Create(Main, TweenInfo.new(0.5), {BackgroundTransparency = 0.1}):Play()
+
+    Verify.MouseButton1Click:Connect(function()
+        if Input.Text == "DZ_2026" then
+            Screen:Destroy()
+            onSuccess()
         else
-            KeyInput.Text = ""
-            KeyInput.PlaceholderText = "WRONG KEY!"
+            Input.Text = "INVALID KEY"
             task.wait(1)
-            KeyInput.PlaceholderText = "Enter Key Here..."
+            Input.Text = ""
         end
     end)
 end
 
 --------------------------------------------------------------------------------
--- 2. MAIN HUB INITIALIZATION
+-- 2. CORE HUB INITIALIZATION
 --------------------------------------------------------------------------------
 local function InitializeHub()
     local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
     local Window = Rayfield:CreateWindow({
-       Name = "DZ HUB v1.0",
-       LoadingTitle = "DZ Hub Execution",
-       LoadingSubtitle = "by Dev Challenge",
-       ConfigurationSaving = {
-          Enabled = true,
-          FolderName = "DZ_Configs"
-       },
-       KeySystem = false -- We used our own custom one above
+        Name = "DZ HUB v1.0",
+        LoadingTitle = "DZ Hub Loading...",
+        LoadingSubtitle = "by Dev Challenge"
     })
 
-    -- Global Toggles[cite: 1, 2]
-    getgenv().DZ_Hub = {
-        Fly = false,
-        FlySpeed = 50,
-        ESP = false,
-        Aimbot = false
+    getgenv().DZ_Config = {
+        Fly = false, FlySpeed = 50,
+        Aimbot = false, TeamCheck = true, FOV = 250,
+        ESP = false
     }
 
+    -- Logic Helper: Team Check[cite: 5]
+    local function IsEnemy(p)
+        if not getgenv().DZ_Config.TeamCheck then return true end
+        if p.Team == nil or p.Team ~= LocalPlayer.Team then return true end
+        return false
+    end
+
     ----------------------------------------------------------------------------
-    -- MAIN TAB: PLAYER MOVEMENT[cite: 3]
+    -- MAIN TAB (MOVEMENT & FIXED FLY)[cite: 3]
     ----------------------------------------------------------------------------
-    local MainTab = Window:CreateTab("Main", 4483362458)
+    local MainTab = Window:CreateTab("Main")
     
-    local FlyToggle = MainTab:CreateToggle({
-       Name = "Fixed Fly",
-       CurrentValue = false,
-       Callback = function(Value)
-          getgenv().DZ_Hub.Fly = Value
-          local Char = LocalPlayer.Character
-          if not Char or not Char:FindFirstChild("HumanoidRootPart") then return end
-          
-          if Value then
-             -- Fly Logic Implementation[cite: 3]
-             task.spawn(function()
-                local Root = Char.HumanoidRootPart
-                local BV = Instance.new("BodyVelocity", Root)
-                BV.Velocity = Vector3.new(0,0,0)
-                BV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-                
-                while getgenv().DZ_Hub.Fly do
-                   local Dir = Vector3.new(0,0,0)
-                   -- Simple movement simulation
-                   BV.Velocity = Dir * getgenv().DZ_Hub.FlySpeed
-                   task.wait()
-                end
-                BV:Destroy() -- Cleanup[cite: 3]
-             end)
-          else
-             -- FIXED: Immediate Stop[cite: 3]
-             if Char:FindFirstChild("HumanoidRootPart") then
-                Char.HumanoidRootPart.Velocity = Vector3.new(0,0,0)
-             end
-          end
-       end,
+    MainTab:CreateToggle({
+        Name = "Fixed Fly",
+        CurrentValue = false,
+        Callback = function(Value)
+            getgenv().DZ_Config.Fly = Value
+            local Char = LocalPlayer.Character
+            if not Char or not Char:FindFirstChild("HumanoidRootPart") then return end
+            
+            if Value then
+                task.spawn(function()
+                    local Root = Char.HumanoidRootPart
+                    local BV = Instance.new("BodyVelocity", Root)
+                    BV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                    
+                    while getgenv().DZ_Config.Fly do
+                        BV.Velocity = Camera.CFrame.LookVector * getgenv().DZ_Config.FlySpeed
+                        task.wait()
+                    end
+                    BV:Destroy() -- Cleanup
+                    Root.Velocity = Vector3.new(0, 0, 0) -- FIXED: Immediate Stop[cite: 3]
+                end)
+            else
+                Char.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0) -- FIXED: Immediate Stop[cite: 3]
+            end
+        end,
     })
 
     MainTab:CreateSlider({
-       Name = "Fly Speed",
-       Range = {16, 500},
-       Increment = 1,
-       CurrentValue = 50,
-       Callback = function(Value)
-          getgenv().DZ_Hub.FlySpeed = Value
-       end,
+        Name = "Fly Speed",
+        Range = {16, 500},
+        Increment = 1,
+        CurrentValue = 50,
+        Callback = function(Value) getgenv().DZ_Config.FlySpeed = Value end,
     })
 
     ----------------------------------------------------------------------------
-    -- VISUALS TAB[cite: 4]
+    -- COMBAT TAB (TEAM CHECKED)[cite: 5]
     ----------------------------------------------------------------------------
-    local VisualsTab = Window:CreateTab("Visuals", 4483362458)
+    local CombatTab = Window:CreateTab("Combat")
+
+    CombatTab:CreateToggle({
+        Name = "Aimbot (Hold E)",
+        CurrentValue = false,
+        Callback = function(Value) getgenv().DZ_Config.Aimbot = Value end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Team Check",
+        CurrentValue = true,
+        Callback = function(Value) getgenv().DZ_Config.TeamCheck = Value end,
+    })
+
+    -- Aimbot Logic from "aimbot code from video.txt"[cite: 4, 5]
+    RunService.RenderStepped:Connect(function()
+        if getgenv().DZ_Config.Aimbot and UserInputService:IsKeyDown(Enum.KeyCode.E) then
+            local Target = nil
+            local BestDist = getgenv().DZ_Config.FOV
+            
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Head") and IsEnemy(p) then
+                    local Pos, OnScreen = Camera:WorldToViewportPoint(p.Character.Head.Position)
+                    if OnScreen then
+                        local Mouse = UserInputService:GetMouseLocation()
+                        local Dist = (Vector2.new(Pos.X, Pos.Y) - Mouse).Magnitude
+                        if Dist < BestDist then
+                            BestDist = Dist
+                            Target = p.Character.Head
+                        end
+                    end
+                end
+            end
+            
+            if Target then
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, Target.Position) -- Aimbot Lock[cite: 5]
+            end
+        end
+    end)
+
+    ----------------------------------------------------------------------------
+    -- VISUALS TAB[cite: 1, 5]
+    ----------------------------------------------------------------------------
+    local VisualsTab = Window:CreateTab("Visuals")
     
     VisualsTab:CreateToggle({
-       Name = "Player ESP",
-       CurrentValue = false,
-       Callback = function(Value)
-          getgenv().DZ_Hub.ESP = Value
-          -- ESP Logic with Team Check[cite: 4]
-       end,
+        Name = "Enemy ESP",
+        CurrentValue = false,
+        Callback = function(Value) getgenv().DZ_Config.ESP = Value end,
     })
 
-    ----------------------------------------------------------------------------
-    -- COMBAT & FARM TABS[cite: 1, 2]
-    ----------------------------------------------------------------------------
-    local CombatTab = Window:CreateTab("Combat", 4483362458)
-    local FarmTab = Window:CreateTab("Farm", 4483362458)
+    -- ESP Loop with Team Check Logic[cite: 5]
+    task.spawn(function()
+        while task.wait(1) do
+            if getgenv().DZ_Config.ESP then
+                -- Simulation of Highlight application from Source 5
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer and p.Character and IsEnemy(p) then
+                        -- Apply Visual Highlights here
+                    end
+                end
+            end
+        end
+    end)
 
-    FarmTab:CreateButton({
-       Name = "Auto-Detect Remotes",
-       Callback = function()
-          Rayfield:Notify({Title = "DZ Hub", Content = "Scanning for RemoteEvents...", Duration = 3})
-          -- Simulation of remote finding[cite: 1]
-       end,
-    })
-
-    Rayfield:Notify({Title = "Success", Content = "DZ Hub Loaded Correctly!", Duration = 5})
+    Rayfield:Notify({Title = "DZ HUB", Content = "System Loaded Successfully", Duration = 5})
 end
 
--- Start Script Sequence
-StartKeySystem(InitializeHub)
+-- Execution Sequence[cite: 3]
+LaunchKeySystem(InitializeHub)
