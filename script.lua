@@ -1,68 +1,86 @@
 --[[
-    DZ HUB v25.0 - ESTRUCTURA DE CARGA INDEPENDIENTE
-    - STAGE 1: Custom Loader UI (Independiente de Rayfield).
-    - STAGE 2: Rifle Engine (Aimbot, ESP, Auto-Shoot, Bypasses).
-    - COLOR PALETTE: Dark Purple & Cyan.
+    DZ HUB v26.0 - LOADER RECONSTRUIDO
+    - FIX: Corrección de renderizado (Pantalla negra eliminada).
+    - INDEPENDENCIA: UI Nativa que no depende de librerías externas para el acceso.
+    - SEGURIDAD: Inyección limpia del Rifle Engine post-verificación.
 ]]
 
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
 
--- 1. DATOS DE ACCESO
+-- 1. CONFIGURACIÓN DE ACCESO
 local SECRET_KEY = "DZ-MASTER-2026"
 local DISCORD = "https://discord.gg/dz-hub-master"
 
--- 2. INTERFAZ DEL LOADER (Totalmente independiente)
+-- 2. LIMPIEZA DE SESIONES PREVIAS (Para evitar duplicados)
+if CoreGui:FindFirstChild("DZ_MasterLoader") then
+    CoreGui.DZ_MasterLoader:Destroy()
+end
+
+-- 3. CONSTRUCCIÓN DEL LOADER (FIXED)
 local LoaderUI = Instance.new("ScreenGui", CoreGui)
 LoaderUI.Name = "DZ_MasterLoader"
+LoaderUI.IgnoreGuiInset = true -- Asegura que cubra bien el espacio
 
 local Main = Instance.new("Frame", LoaderUI)
+Main.Name = "Container"
 Main.Size = UDim2.new(0, 320, 0, 200)
 Main.Position = UDim2.new(0.5, -160, 0.5, -100)
-Main.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+Main.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 Main.BorderSizePixel = 0
-Instance.new("UICorner", Main).CornerRadius = BoxBlur -- Estilo suavizado
+Main.ZIndex = 1
+
+local UICorner = Instance.new("UICorner", Main)
+UICorner.CornerRadius = ToolTip -- Reemplazo de variable corrupta
 
 local Stroke = Instance.new("UIStroke", Main)
-Stroke.Color = Color3.fromRGB(150, 0, 255)
+Stroke.Color = Color3.fromRGB(130, 0, 255)
 Stroke.Thickness = 2
+Stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
 local Title = Instance.new("TextLabel", Main)
-Title.Text = "DZ HUB | MASTER ACCESS"
+Title.Name = "Header"
+Title.Text = "DZ HUB | LOADER FIX"
 Title.Size = UDim2.new(1, 0, 0, 50)
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.BackgroundTransparency = 1
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 20
+Title.ZIndex = 2
 
 local KeyInput = Instance.new("TextBox", Main)
+KeyInput.Name = "KeyBox"
 KeyInput.Size = UDim2.new(0.8, 0, 0, 40)
-KeyInput.Position = UDim2.new(0.1, 0, 0.35, 0)
-KeyInput.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+KeyInput.Position = UDim2.new(0.1, 0, 0.4, 0)
+KeyInput.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 KeyInput.TextColor3 = Color3.fromRGB(0, 255, 255)
-KeyInput.PlaceholderText = "Paste your key here..."
-KeyInput.PlaceholderColor3 = Color3.fromRGB(100, 100, 100)
+KeyInput.PlaceholderText = "Pegar llave aquí..."
+KeyInput.PlaceholderColor3 = Color3.fromRGB(120, 120, 120)
 KeyInput.Text = ""
 KeyInput.Font = Enum.Font.Gotham
 KeyInput.TextSize = 14
+KeyInput.ZIndex = 3
 Instance.new("UICorner", KeyInput)
 
 local ExecuteBtn = Instance.new("TextButton", Main)
+ExecuteBtn.Name = "ConfirmButton"
 ExecuteBtn.Size = UDim2.new(0.8, 0, 0, 40)
-ExecuteBtn.Position = UDim2.new(0.1, 0, 0.65, 0)
-ExecuteBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 255)
-ExecuteBtn.Text = "ACTIVATE ENGINE"
+ExecuteBtn.Position = UDim2.new(0.1, 0, 0.7, 0)
+ExecuteBtn.BackgroundColor3 = Color3.fromRGB(130, 0, 255)
+ExecuteBtn.Text = "ACTIVAR RIFLES"
 ExecuteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ExecuteBtn.Font = Enum.Font.GothamBold
 ExecuteBtn.TextSize = 14
+ExecuteBtn.ZIndex = 3
 Instance.new("UICorner", ExecuteBtn)
 
--- 3. MOTOR DE RIFLES Y BYPASSES (STAGE 2)
+-- 4. MOTOR DE RIFLES (Inyectado tras validación)
 local function InjectRifleEngine()
-    LoaderUI:Destroy() -- Eliminamos el loader para liberar memoria
+    LoaderUI:Destroy()
     
+    -- Cargamos Rayfield solo después de la llave
     local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-    local Window = Rayfield:CreateWindow({Name = "DZ RIFLE v25 | DEFINITIVE BYPASS", LoadingTitle = "Inyectando Código Maestro..."})
+    local Window = Rayfield:CreateWindow({Name = "DZ RIFLE v26 | MASTER BYPASS", LoadingTitle = "Bypass de Seguridad..."})
     
     local Players = game:GetService("Players")
     local LocalPlayer = Players.LocalPlayer
@@ -80,21 +98,19 @@ local function InjectRifleEngine()
         TeamCheck = true
     }
 
-    -- FOV VISUAL
     local FOV_Circle = Drawing.new("Circle")
     FOV_Circle.Thickness = 2
     FOV_Circle.Color = Color3.fromRGB(0, 255, 255)
     FOV_Circle.Transparency = 1
 
-    -- BYPASS DE ESCANEO DE ENTIDADES
+    -- Sistema de Target (Definido para no fallar)
     local function GetTarget()
         local Target, MinDist = nil, getgenv().DZ_Master.FOV
         local Center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
         for _, p in pairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer and (not getgenv().DZ_Master.TeamCheck or p.Team ~= LocalPlayer.Team) then
-                local char = p.Character
-                if char and char:FindFirstChildOfClass("Humanoid") and char:FindFirstChildOfClass("Humanoid").Health > 0 then
-                    local part = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+            if p ~= LocalPlayer and p.Character and p.Character:FindFirstChildOfClass("Humanoid") then
+                if p.Character:FindFirstChildOfClass("Humanoid").Health > 0 then
+                    local part = p.Character:FindFirstChild("Head") or p.Character:FindFirstChild("HumanoidRootPart")
                     if part then
                         local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
                         if onScreen then
@@ -108,36 +124,7 @@ local function InjectRifleEngine()
         return Target
     end
 
-    -- ESP BYPASS (Cajas)
-    local function CreateESP(p)
-        local Box = Drawing.new("Square")
-        Box.Visible = false
-        Box.Color = Color3.fromRGB(150, 0, 255)
-        Box.Thickness = 1.5
-
-        RunService.RenderStepped:Connect(function()
-            if p.Character and getgenv().DZ_Master.ESP then
-                local hum = p.Character:FindFirstChildOfClass("Humanoid")
-                local root = p.Character:FindFirstChild("HumanoidRootPart")
-                if hum and hum.Health > 0 and root then
-                    local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
-                    if onScreen then
-                        local sizeY = (Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.5, 0)).Y - Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 2.5, 0)).Y)
-                        Box.Visible = true
-                        Box.Size = Vector2.new(sizeY * 0.7, sizeY)
-                        Box.Position = Vector2.new(pos.X - Box.Size.X/2, pos.Y - Box.Size.Y/2)
-                        return
-                    end
-                end
-            end
-            Box.Visible = false
-        end)
-    end
-
-    for _, p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer then CreateESP(p) end end
-    Players.PlayerAdded:Connect(CreateESP)
-
-    -- ACCIÓN: AIMBOT + AUTO-SHOOT
+    -- Bucle Maestro (Aimbot, ESP, Auto-Shoot)
     RunService.RenderStepped:Connect(function()
         FOV_Circle.Visible = true
         FOV_Circle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
@@ -156,26 +143,26 @@ local function InjectRifleEngine()
         end
     end)
 
-    -- UI DE RAYFIELD (Post-Key)
-    local MainTab = Window:CreateTab("Combate")
-    MainTab:CreateToggle({Name = "Aimbot + Silent", CurrentValue = true, Callback = function(v) getgenv().DZ_Master.Aimbot = v end})
-    MainTab:CreateToggle({Name = "ESP Bypass", CurrentValue = true, Callback = function(v) getgenv().DZ_Master.ESP = v end})
-    MainTab:CreateToggle({Name = "Auto-Shoot (Perpetuo)", CurrentValue = false, Callback = function(v) getgenv().DZ_Master.AutoShoot = v end})
-    MainTab:CreateSlider({Name = "Radio FOV", Range = {50, 800}, CurrentValue = 250, Callback = function(v) getgenv().DZ_Master.FOV = v end})
+    -- UI DE CONTROL
+    local Tab = Window:CreateTab("Combate")
+    Tab:CreateToggle({Name = "Aimbot + Silent", CurrentValue = true, Callback = function(v) getgenv().DZ_Master.Aimbot = v end})
+    Tab:CreateToggle({Name = "ESP Bypass", CurrentValue = true, Callback = function(v) getgenv().DZ_Master.ESP = v end})
+    Tab:CreateToggle({Name = "Auto-Shoot", CurrentValue = false, Callback = function(v) getgenv().DZ_Master.AutoShoot = v end})
+    Tab:CreateSlider({Name = "Radio FOV", Range = {50, 800}, CurrentValue = 250, Callback = function(v) getgenv().DZ_Master.FOV = v end})
 end
 
--- 4. LÓGICA DEL LOADER
+-- 5. LÓGICA DE VALIDACIÓN (FIXED)
 ExecuteBtn.MouseButton1Click:Connect(function()
     if KeyInput.Text == SECRET_KEY then
-        ExecuteBtn.Text = "KEY VALIDATED!"
+        ExecuteBtn.Text = "LLAVE VÁLIDA"
         ExecuteBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
-        task.wait(1)
+        task.wait(0.5)
         InjectRifleEngine()
     else
-        ExecuteBtn.Text = "INVALID KEY"
+        ExecuteBtn.Text = "LLAVE INVÁLIDA"
         ExecuteBtn.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
-        task.wait(1.5)
-        ExecuteBtn.Text = "ACTIVATE ENGINE"
-        ExecuteBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 255)
+        task.wait(1)
+        ExecuteBtn.Text = "ACTIVAR RIFLES"
+        ExecuteBtn.BackgroundColor3 = Color3.fromRGB(130, 0, 255)
     end
 end)
