@@ -3,7 +3,15 @@
 -- ║   Key: Diogo1234                            ║
 -- ╚══════════════════════════════════════════════╝
 
-local KEY_CORRECTA     = "Diogo1234"
+local KEY_CORRECTA = "Diogo1234"
+
+-- ═══════════════════════════════════════════
+--  CONFIGURACION HITBOX  (edita aqui)
+-- ═══════════════════════════════════════════
+local HITBOX_SIZE    = 10   -- studs de lado (cubo). Cambia este valor.
+local HIT_COOLDOWN   = 1.0  -- segundos entre hits del mismo jugador
+
+-- ═══════════════════════════════════════════
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -32,6 +40,7 @@ local C = {
     murder   = Color3.fromRGB(255, 50,  70),
     innocent = Color3.fromRGB(80,  255, 140),
     gunFloor = Color3.fromRGB(255, 220, 50),
+    hitbox   = Color3.fromRGB(255, 120, 30),
 }
 
 -- ═══════════════════════════════════════════
@@ -40,7 +49,6 @@ local C = {
 local function getRole(player)
     local char = player.Character
     local bp   = player:FindFirstChildOfClass("Backpack")
-
     local function hasTool(name)
         local nl = name:lower()
         if char then
@@ -55,12 +63,10 @@ local function getRole(player)
         end
         return false
     end
-
-    if hasTool("Knife")   then return "murder"  end
+    if hasTool("Knife")   then return "murder" end
     if hasTool("Revolver") or hasTool("Sheriff") or hasTool("Gun") or hasTool("Pistol") then
         return "sheriff"
     end
-
     local function scanValues(parent)
         if not parent then return nil end
         for _, v in ipairs(parent:GetChildren()) do
@@ -76,20 +82,17 @@ local function getRole(player)
         end
         return nil
     end
-
     local r = scanValues(char) or scanValues(player)
     if r then return r end
-
     local ls = player:FindFirstChild("leaderstats")
     if ls then
         local rv = ls:FindFirstChild("Role") or ls:FindFirstChild("role")
         if rv then
             local s = tostring(rv.Value):lower()
-            if s:find("murder")  then return "murder"  end
+            if s:find("murder") then return "murder" end
             if s:find("sheriff") then return "sheriff" end
         end
     end
-
     return "innocent"
 end
 
@@ -125,7 +128,6 @@ local function toast(msg, color)
     f.ZIndex = 60
     f.Parent = ToastGui
     Instance.new("UICorner", f).CornerRadius = UDim.new(0, 10)
-
     local bar = Instance.new("Frame")
     bar.Size = UDim2.new(0, 4, 1, 0)
     bar.BackgroundColor3 = color
@@ -133,7 +135,6 @@ local function toast(msg, color)
     bar.ZIndex = 61
     bar.Parent = f
     Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 4)
-
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -16, 1, 0)
     lbl.Position = UDim2.new(0, 14, 0, 0)
@@ -145,15 +146,12 @@ local function toast(msg, color)
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.ZIndex = 61
     lbl.Parent = f
-
     local stroke = Instance.new("UIStroke", f)
     stroke.Color = color
-
     TweenService:Create(f, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
         Position = UDim2.new(1, -282, 0, toastY)
     }):Play()
     toastY += 50
-
     task.delay(2.8, function()
         TweenService:Create(f, TweenInfo.new(0.25), {
             Position = UDim2.new(1, 20, 0, f.Position.Y.Offset),
@@ -251,7 +249,7 @@ KBStr.Color = C.line
 KBStr.Thickness = 1.5
 KBStr.Parent = KBox
 KBox.Focused:Connect(function()  TweenService:Create(KBStr, TweenInfo.new(0.2), {Color = C.accent}):Play() end)
-KBox.FocusLost:Connect(function() TweenService:Create(KBStr, TweenInfo.new(0.2), {Color = C.line}):Play()   end)
+KBox.FocusLost:Connect(function() TweenService:Create(KBStr, TweenInfo.new(0.2), {Color = C.line}):Play()  end)
 
 local function mkKBtn(text, posX, bg, tc)
     local b = Instance.new("TextButton")
@@ -302,17 +300,116 @@ VerifyBtn.MouseButton1Click:Connect(function()
         -- ════════════════════════════════════════════════════════════
         --                        MAIN SCRIPT
         -- ════════════════════════════════════════════════════════════
-        local speedEnabled  = false
-        local noclipEnabled = false
-        local flyEnabled    = false
-        local jumpEnabled   = false
-        local espEnabled    = false
-        local currentSpeed  = 50
-        local currentJump   = 50
-        local hideKey       = Enum.KeyCode.RightShift
-        local uiVisible     = true
+        local speedEnabled    = false
+        local noclipEnabled   = false
+        local flyEnabled      = false
+        local jumpEnabled     = false
+        local espEnabled      = false
+        local hitboxEnabled   = false
+        local hitDetectEnabled = false
+        local currentSpeed    = 50
+        local currentJump     = 50
+        local hideKey         = Enum.KeyCode.RightShift
+        local uiVisible       = true
         local speedLoop, noclipLoop, flyLoop, espLoop
-        local espObjects    = {}
+        local hitboxLoop, hitDetectLoop
+        local espObjects      = {}
+
+        -- ════════════════════════════════════════════
+        --  SISTEMA HITBOX
+        --  OverlapParams reutilizable (se crea una vez)
+        -- ════════════════════════════════════════════
+        local hitCooldowns   = {}   -- [player] = last hit timestamp
+        local hitLogLbl      = nil  -- referencia al label de log en UI (se asigna mas abajo)
+        local originalSizes  = {}   -- [player] = Vector3 original del HRP
+
+        -- Guarda el tamaño original de un jugador antes de modificarlo
+        local function backupHRPSize(player)
+            if originalSizes[player] then return end
+            local char = player.Character
+            if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then originalSizes[player] = hrp.Size end
+        end
+
+        -- Restaura el tamaño original
+        local function restoreHRPSize(player)
+            local char = player.Character
+            if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp and originalSizes[player] then
+                hrp.Size = originalSizes[player]
+            end
+            originalSizes[player] = nil
+        end
+
+        -- Aplica HITBOX_SIZE al HRP de todos los enemigos
+        local function applyHitboxes()
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= lp then
+                    backupHRPSize(p)
+                    local char = p.Character
+                    if char then
+                        local hrp = char:FindFirstChild("HumanoidRootPart")
+                        if hrp then
+                            hrp.Size = Vector3.new(HITBOX_SIZE, HITBOX_SIZE, HITBOX_SIZE)
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Restaura todos los tamaños originales
+        local function removeAllHitboxes()
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= lp then restoreHRPSize(p) end
+            end
+        end
+
+        -- OverlapParams reutilizable para hit detection
+        local overlapParams = OverlapParams.new()
+        overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+
+        local function updateOverlapFilter()
+            local char = lp.Character
+            overlapParams.FilterDescendantsInstances = char and {char} or {}
+        end
+
+        -- Deteccion de hits: busca jugadores dentro del cubo HITBOX_SIZE
+        -- alrededor del HumanoidRootPart local, con cooldown por jugador
+        local function runHitDetection()
+            local char = lp.Character
+            if not char then return end
+            local myHRP = char:FindFirstChild("HumanoidRootPart")
+            if not myHRP then return end
+
+            updateOverlapFilter()
+            local boxSize = Vector3.new(HITBOX_SIZE, HITBOX_SIZE, HITBOX_SIZE)
+            local parts   = workspace:GetPartBoundsInBox(myHRP.CFrame, boxSize, overlapParams)
+
+            local now = tick()
+            local seen = {}  -- evitar hits dobles por multiples partes del mismo player
+
+            for _, part in ipairs(parts) do
+                local hitChar = part.Parent
+                local hitPlayer = Players:GetPlayerFromCharacter(hitChar)
+                if hitPlayer and hitPlayer ~= lp and not seen[hitPlayer] then
+                    seen[hitPlayer] = true
+                    local lastHit = hitCooldowns[hitPlayer] or 0
+                    if (now - lastHit) >= HIT_COOLDOWN then
+                        hitCooldowns[hitPlayer] = now
+                        -- Notificacion de hit
+                        local role  = getRole(hitPlayer)
+                        local col   = roleColor(role)
+                        toast("HIT: " .. hitPlayer.Name .. " [" .. roleLabel(role) .. "]", col)
+                        if hitLogLbl then
+                            hitLogLbl.Text = "Ultimo hit: " .. hitPlayer.Name .. " [" .. roleLabel(role) .. "]"
+                            hitLogLbl.TextColor3 = col
+                        end
+                    end
+                end
+            end
+        end
 
         -- ════════════════════════════════════════
         --  MAIN GUI
@@ -338,7 +435,7 @@ VerifyBtn.MouseButton1Click:Connect(function()
         MStr.Parent = Main
 
         TweenService:Create(Main, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-            Size = UDim2.new(0, 620, 0, 430)
+            Size = UDim2.new(0, 640, 0, 430)
         }):Play()
 
         local TopGrad = Instance.new("Frame")
@@ -371,7 +468,6 @@ VerifyBtn.MouseButton1Click:Connect(function()
         HIcon.ZIndex = 9
         HIcon.Parent = Header
         Instance.new("UICorner", HIcon).CornerRadius = UDim.new(0, 7)
-
         local HIconLabel = Instance.new("TextLabel")
         HIconLabel.Size = UDim2.new(1, 0, 1, 0)
         HIconLabel.BackgroundTransparency = 1
@@ -403,7 +499,6 @@ VerifyBtn.MouseButton1Click:Connect(function()
         HBadge.Parent = Header
         Instance.new("UICorner", HBadge).CornerRadius = UDim.new(0, 6)
         Instance.new("UIGradient", HBadge).Color = ColorSequence.new(C.accentR, Color3.fromRGB(255,100,50))
-
         local HBLbl = Instance.new("TextLabel")
         HBLbl.Size = UDim2.new(1, 0, 1, 0)
         HBLbl.BackgroundTransparency = 1
@@ -469,9 +564,10 @@ VerifyBtn.MouseButton1Click:Connect(function()
 
         local tabDefs = {
             {name = "Movement", label = "Movement"},
-            {name = "Teleport",  label = "Teleport"},
-            {name = "ESP",       label = "ESP"},
-            {name = "Misc",      label = "Misc"},
+            {name = "Teleport", label = "Teleport"},
+            {name = "ESP",      label = "ESP"},
+            {name = "Hitbox",   label = "Hitbox"},
+            {name = "Misc",     label = "Misc"},
         }
 
         local function switchTab(name)
@@ -494,8 +590,8 @@ VerifyBtn.MouseButton1Click:Connect(function()
 
         local function crearTab(def, idx)
             local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(1, -10, 0, 48)
-            btn.Position = UDim2.new(0, 5, 0, (idx-1)*52 + 8)
+            btn.Size = UDim2.new(1, -10, 0, 44)
+            btn.Position = UDim2.new(0, 5, 0, (idx-1)*48 + 6)
             btn.BackgroundColor3 = Color3.fromRGB(22, 22, 40)
             btn.BackgroundTransparency = 1
             btn.TextColor3 = C.textDim
@@ -545,10 +641,11 @@ VerifyBtn.MouseButton1Click:Connect(function()
             return page
         end
 
-        local movPage  = crearTab(tabDefs[1], 1)
-        local tpPage   = crearTab(tabDefs[2], 2)
-        local espPage  = crearTab(tabDefs[3], 3)
-        local miscPage = crearTab(tabDefs[4], 4)
+        local movPage    = crearTab(tabDefs[1], 1)
+        local tpPage     = crearTab(tabDefs[2], 2)
+        local espPage    = crearTab(tabDefs[3], 3)
+        local hbPage     = crearTab(tabDefs[4], 4)
+        local miscPage   = crearTab(tabDefs[5], 5)
         switchTab("Movement")
 
         -- ════════════════════════════════════════
@@ -713,6 +810,7 @@ VerifyBtn.MouseButton1Click:Connect(function()
                     cb(val)
                 end
             end)
+            return valLbl
         end
 
         local function mkButton(parent, texto, posY, col, cb)
@@ -744,19 +842,13 @@ VerifyBtn.MouseButton1Click:Connect(function()
             if on then
                 speedLoop = RunService.Heartbeat:Connect(function()
                     local c = lp.Character
-                    if c then
-                        local h = c:FindFirstChildOfClass("Humanoid")
-                        if h then h.WalkSpeed = currentSpeed end
-                    end
+                    if c then local h = c:FindFirstChildOfClass("Humanoid") if h then h.WalkSpeed = currentSpeed end end
                 end)
                 toast("Speed ON: " .. currentSpeed, C.accentG)
             else
                 if speedLoop then speedLoop:Disconnect() speedLoop = nil end
                 local c = lp.Character
-                if c then
-                    local h = c:FindFirstChildOfClass("Humanoid")
-                    if h then h.WalkSpeed = 16 end
-                end
+                if c then local h = c:FindFirstChildOfClass("Humanoid") if h then h.WalkSpeed = 16 end end
                 toast("Speed OFF", C.accentR)
             end
         end)
@@ -768,10 +860,7 @@ VerifyBtn.MouseButton1Click:Connect(function()
             local c = lp.Character
             if c then
                 local h = c:FindFirstChildOfClass("Humanoid")
-                if h then
-                    h.UseJumpPower = true
-                    h.JumpPower = on and currentJump or 50
-                end
+                if h then h.UseJumpPower = true h.JumpPower = on and currentJump or 50 end
             end
             toast(on and "Jump ON" or "Jump OFF", on and C.accentG or C.accentR)
         end)
@@ -779,10 +868,7 @@ VerifyBtn.MouseButton1Click:Connect(function()
             currentJump = v
             if jumpEnabled then
                 local c = lp.Character
-                if c then
-                    local h = c:FindFirstChildOfClass("Humanoid")
-                    if h then h.UseJumpPower = true h.JumpPower = v end
-                end
+                if c then local h = c:FindFirstChildOfClass("Humanoid") if h then h.UseJumpPower = true h.JumpPower = v end end
             end
         end)
 
@@ -821,12 +907,9 @@ VerifyBtn.MouseButton1Click:Connect(function()
                 toast("Fly ON", C.accentG)
             else
                 if flyLoop then flyLoop:Disconnect() flyLoop = nil end
-                local v = hrp:FindFirstChild("FlyVel")
-                local g = hrp:FindFirstChild("FlyGyro")
-                if v then v:Destroy() end
-                if g then g:Destroy() end
-                local h = char:FindFirstChildOfClass("Humanoid")
-                if h then h.PlatformStand = false end
+                local v = hrp:FindFirstChild("FlyVel") local g = hrp:FindFirstChild("FlyGyro")
+                if v then v:Destroy() end if g then g:Destroy() end
+                local h = char:FindFirstChildOfClass("Humanoid") if h then h.PlatformStand = false end
                 toast("Fly OFF", C.accentR)
             end
         end)
@@ -837,11 +920,7 @@ VerifyBtn.MouseButton1Click:Connect(function()
             if on then
                 noclipLoop = RunService.Stepped:Connect(function()
                     local c = lp.Character
-                    if c then
-                        for _, p in pairs(c:GetDescendants()) do
-                            if p:IsA("BasePart") then p.CanCollide = false end
-                        end
-                    end
+                    if c then for _, p in pairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = false end end end
                 end)
                 toast("Noclip ON", C.accentG)
             else
@@ -854,7 +933,6 @@ VerifyBtn.MouseButton1Click:Connect(function()
         --  TELEPORT TAB
         -- ════════════════════════════════════════════════════════
         secTitle(tpPage, "Teleport a Jugadores", 10)
-
         local plrListFrame = Instance.new("Frame")
         plrListFrame.Size = UDim2.new(1, -20, 0, 200)
         plrListFrame.Position = UDim2.new(0, 10, 0, 44)
@@ -863,7 +941,6 @@ VerifyBtn.MouseButton1Click:Connect(function()
         plrListFrame.ZIndex = 5
         plrListFrame.Parent = tpPage
         Instance.new("UICorner", plrListFrame).CornerRadius = UDim.new(0, 10)
-
         local plrScroll = Instance.new("ScrollingFrame")
         plrScroll.Size = UDim2.new(1, -8, 1, -8)
         plrScroll.Position = UDim2.new(0, 4, 0, 4)
@@ -885,65 +962,32 @@ VerifyBtn.MouseButton1Click:Connect(function()
             end
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= lp then
-                    local role = getRole(p)
-                    local col  = roleColor(role)
-                    local icon = roleLabel(role)
-
+                    local role = getRole(p) local col = roleColor(role) local icon = roleLabel(role)
                     local row = Instance.new("Frame")
-                    row.Size = UDim2.new(1, 0, 0, 40)
-                    row.BackgroundColor3 = C.bg3
-                    row.BorderSizePixel = 0
-                    row.ZIndex = 7
-                    row.Parent = plrScroll
+                    row.Size = UDim2.new(1, 0, 0, 40) row.BackgroundColor3 = C.bg3
+                    row.BorderSizePixel = 0 row.ZIndex = 7 row.Parent = plrScroll
                     Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
-
                     local roleBar = Instance.new("Frame")
-                    roleBar.Size = UDim2.new(0, 4, 1, 0)
-                    roleBar.BackgroundColor3 = col
-                    roleBar.BorderSizePixel = 0
-                    roleBar.ZIndex = 8
-                    roleBar.Parent = row
+                    roleBar.Size = UDim2.new(0, 4, 1, 0) roleBar.BackgroundColor3 = col
+                    roleBar.BorderSizePixel = 0 roleBar.ZIndex = 8 roleBar.Parent = row
                     Instance.new("UICorner", roleBar).CornerRadius = UDim.new(0, 4)
-
                     local nameLbl = Instance.new("TextLabel")
-                    nameLbl.Size = UDim2.new(0.55, 0, 1, 0)
-                    nameLbl.Position = UDim2.new(0, 14, 0, 0)
-                    nameLbl.BackgroundTransparency = 1
-                    nameLbl.Text = p.Name
-                    nameLbl.TextColor3 = C.text
-                    nameLbl.TextScaled = true
-                    nameLbl.Font = Enum.Font.GothamBold
-                    nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-                    nameLbl.ZIndex = 8
-                    nameLbl.Parent = row
-
+                    nameLbl.Size = UDim2.new(0.55, 0, 1, 0) nameLbl.Position = UDim2.new(0, 14, 0, 0)
+                    nameLbl.BackgroundTransparency = 1 nameLbl.Text = p.Name nameLbl.TextColor3 = C.text
+                    nameLbl.TextScaled = true nameLbl.Font = Enum.Font.GothamBold
+                    nameLbl.TextXAlignment = Enum.TextXAlignment.Left nameLbl.ZIndex = 8 nameLbl.Parent = row
                     local roleLbl = Instance.new("TextLabel")
-                    roleLbl.Size = UDim2.new(0.38, 0, 1, 0)
-                    roleLbl.Position = UDim2.new(0.58, 0, 0, 0)
-                    roleLbl.BackgroundTransparency = 1
-                    roleLbl.Text = "[" .. icon .. "]"
-                    roleLbl.TextColor3 = col
-                    roleLbl.TextScaled = true
-                    roleLbl.Font = Enum.Font.Gotham
-                    roleLbl.TextXAlignment = Enum.TextXAlignment.Right
-                    roleLbl.ZIndex = 8
-                    roleLbl.Parent = row
-
+                    roleLbl.Size = UDim2.new(0.38, 0, 1, 0) roleLbl.Position = UDim2.new(0.58, 0, 0, 0)
+                    roleLbl.BackgroundTransparency = 1 roleLbl.Text = "[" .. icon .. "]" roleLbl.TextColor3 = col
+                    roleLbl.TextScaled = true roleLbl.Font = Enum.Font.Gotham
+                    roleLbl.TextXAlignment = Enum.TextXAlignment.Right roleLbl.ZIndex = 8 roleLbl.Parent = row
                     local tpBtn = Instance.new("TextButton")
-                    tpBtn.Size = UDim2.new(1, 0, 1, 0)
-                    tpBtn.BackgroundTransparency = 1
-                    tpBtn.Text = ""
-                    tpBtn.ZIndex = 9
-                    tpBtn.Parent = row
-                    tpBtn.MouseEnter:Connect(function()
-                        TweenService:Create(row, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(32,32,58)}):Play()
-                    end)
-                    tpBtn.MouseLeave:Connect(function()
-                        TweenService:Create(row, TweenInfo.new(0.15), {BackgroundColor3 = C.bg3}):Play()
-                    end)
+                    tpBtn.Size = UDim2.new(1, 0, 1, 0) tpBtn.BackgroundTransparency = 1
+                    tpBtn.Text = "" tpBtn.ZIndex = 9 tpBtn.Parent = row
+                    tpBtn.MouseEnter:Connect(function() TweenService:Create(row, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(32,32,58)}):Play() end)
+                    tpBtn.MouseLeave:Connect(function() TweenService:Create(row, TweenInfo.new(0.15), {BackgroundColor3 = C.bg3}):Play() end)
                     tpBtn.MouseButton1Click:Connect(function()
-                        local mc = lp.Character
-                        local tc = p.Character
+                        local mc = lp.Character local tc = p.Character
                         if mc and tc then
                             local mhrp = mc:FindFirstChild("HumanoidRootPart")
                             local thrp = tc:FindFirstChild("HumanoidRootPart")
@@ -959,17 +1003,12 @@ VerifyBtn.MouseButton1Click:Connect(function()
 
         refreshPlayers()
         mkButton(tpPage, "Actualizar Lista", 252, C.accent, function()
-            refreshPlayers()
-            toast("Lista actualizada", C.accentB)
+            refreshPlayers() toast("Lista actualizada", C.accentB)
         end)
         Players.PlayerAdded:Connect(function()   task.wait(1)   refreshPlayers() end)
         Players.PlayerRemoving:Connect(function() task.wait(0.1) refreshPlayers() end)
 
-        -- ──────────────────────────────────────────────
-        --  ARMA DEL SHERIFF EN SUELO
-        -- ──────────────────────────────────────────────
         secTitle(tpPage, "Arma del Sheriff (suelo)", 306)
-
         local gunStatusLbl = Instance.new("TextLabel")
         gunStatusLbl.Size = UDim2.new(1, -20, 0, 32)
         gunStatusLbl.Position = UDim2.new(0, 10, 0, 340)
@@ -984,46 +1023,30 @@ VerifyBtn.MouseButton1Click:Connect(function()
         gunStatusLbl.Parent = tpPage
         Instance.new("UICorner", gunStatusLbl).CornerRadius = UDim.new(0, 8)
 
-        local SHERIFF_GUN_NAMES = {
-            "revolver","sheriffgun","sheriff_gun","sheriffweapon",
-            "gun","pistol","classicsheriff","sheriff","sherrifgun",
-            "dropped_gun","droppedgun","weapongun"
-        }
-
-        local cachedGun    = nil  -- cache para evitar scan completo cada frame
-        local gunCacheTime = 0
-        local GUN_CACHE_TTL = 0.5  -- re-escanea cada 0.5s
+        local SHERIFF_GUN_NAMES = {"revolver","sheriffgun","sheriff_gun","sheriffweapon","gun","pistol","classicsheriff","sheriff","sherrifgun","dropped_gun","droppedgun","weapongun"}
+        local cachedGun = nil local gunCacheTime = 0 local GUN_CACHE_TTL = 0.5
 
         local function findSheriffGun()
             local now = tick()
             if cachedGun and (now - gunCacheTime) < GUN_CACHE_TTL then
-                -- Verifica que el cached sigue siendo válido
                 if cachedGun.Parent then return cachedGun end
                 cachedGun = nil
             end
-
-            local function isEquippedByPlayer(obj)
+            local function isEquipped(obj)
                 for _, p in ipairs(Players:GetPlayers()) do
-                    local c = p.Character
-                    if c and obj:IsDescendantOf(c) then return true end
+                    local c = p.Character if c and obj:IsDescendantOf(c) then return true end
                 end
                 return false
             end
-
             for _, obj in ipairs(workspace:GetDescendants()) do
                 local n = obj.Name:lower()
                 for _, name in ipairs(SHERIFF_GUN_NAMES) do
                     if n == name or n:find(name, 1, true) then
-                        if not isEquippedByPlayer(obj) then
-                            cachedGun    = obj
-                            gunCacheTime = now
-                            return obj
-                        end
+                        if not isEquipped(obj) then cachedGun = obj gunCacheTime = now return obj end
                     end
                 end
             end
-            cachedGun = nil
-            return nil
+            cachedGun = nil return nil
         end
 
         local function getGunPosition(gun)
@@ -1036,64 +1059,37 @@ VerifyBtn.MouseButton1Click:Connect(function()
         end
 
         mkButton(tpPage, "TP a Arma del Sheriff", 380, C.gunFloor, function()
-            local char = lp.Character
-            if not char then toast("Sin personaje", C.accentR) return end
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if not hrp then return end
+            local char = lp.Character if not char then toast("Sin personaje", C.accentR) return end
+            local hrp = char:FindFirstChild("HumanoidRootPart") if not hrp then return end
             local gun = findSheriffGun()
             if gun then
                 local pos = getGunPosition(gun)
-                if pos then
-                    hrp.CFrame = CFrame.new(pos + Vector3.new(0, 4, 0))
-                    gunStatusLbl.Text = "  OK: " .. gun.Name
-                    gunStatusLbl.TextColor3 = C.accentG
-                    toast("TP a arma: " .. gun.Name, C.gunFloor)
-                else
-                    toast("Sin posicion del arma", C.accentY)
-                end
+                if pos then hrp.CFrame = CFrame.new(pos + Vector3.new(0, 4, 0)) gunStatusLbl.Text = "  OK: " .. gun.Name gunStatusLbl.TextColor3 = C.accentG toast("TP a arma: " .. gun.Name, C.gunFloor)
+                else toast("Sin posicion del arma", C.accentY) end
             else
-                toast("Arma no encontrada", C.accentR)
-                gunStatusLbl.Text = "  No encontrada en workspace"
-                gunStatusLbl.TextColor3 = C.accentR
+                toast("Arma no encontrada", C.accentR) gunStatusLbl.Text = "  No encontrada" gunStatusLbl.TextColor3 = C.accentR
             end
         end)
-
         mkButton(tpPage, "Buscar Arma (solo info)", 432, C.accentB, function()
-            cachedGun = nil  -- fuerza re-scan
-            local gun = findSheriffGun()
+            cachedGun = nil local gun = findSheriffGun()
             if gun then
                 local pos = getGunPosition(gun)
                 local posStr = pos and string.format("(%.0f, %.0f, %.0f)", pos.X, pos.Y, pos.Z) or "?"
-                gunStatusLbl.Text = "  " .. gun.Name .. " en " .. posStr
-                gunStatusLbl.TextColor3 = C.gunFloor
+                gunStatusLbl.Text = "  " .. gun.Name .. " en " .. posStr gunStatusLbl.TextColor3 = C.gunFloor
                 toast("Arma hallada: " .. gun.Name, C.gunFloor)
-            else
-                gunStatusLbl.Text = "  No esta en el suelo aun"
-                gunStatusLbl.TextColor3 = C.textDim
-                toast("Arma no en suelo", C.accentY)
-            end
+            else gunStatusLbl.Text = "  No esta en el suelo aun" gunStatusLbl.TextColor3 = C.textDim toast("Arma no en suelo", C.accentY) end
         end)
 
-        local gunWatcher   = nil
-        local gunAlertEnabled = false
-
+        local gunWatcher = nil
         secTitle(tpPage, "Alerta de Arma Caida", 484)
         mkToggle(tpPage, "Auto-detectar Arma en Suelo", 520, function(on)
-            gunAlertEnabled = on
             if on then
                 local lastCheck = 0
                 gunWatcher = RunService.Heartbeat:Connect(function()
-                    local now = tick()
-                    if now - lastCheck < 0.5 then return end  -- revisar cada 0.5s
-                    lastCheck = now
+                    local now = tick() if now - lastCheck < 0.5 then return end lastCheck = now
                     local gun = findSheriffGun()
-                    if gun then
-                        gunStatusLbl.Text = "  ARMA EN SUELO: " .. gun.Name
-                        gunStatusLbl.TextColor3 = C.gunFloor
-                    else
-                        gunStatusLbl.Text = "  Sin arma en suelo"
-                        gunStatusLbl.TextColor3 = C.textDim
-                    end
+                    if gun then gunStatusLbl.Text = "  ARMA EN SUELO: " .. gun.Name gunStatusLbl.TextColor3 = C.gunFloor
+                    else gunStatusLbl.Text = "  Sin arma en suelo" gunStatusLbl.TextColor3 = C.textDim end
                 end)
                 toast("Detector de arma ON", C.gunFloor)
             else
@@ -1103,29 +1099,19 @@ VerifyBtn.MouseButton1Click:Connect(function()
         end)
 
         -- ════════════════════════════════════════════════════════
-        --  ESP MM2  -  OPTIMIZADO
-        --  - Billboards siempre activos, sin lineas (caro)
-        --  - Loop usa Heartbeat throttled a ~20fps
-        --  - getRole se cachea por jugador con TTL de 0.4s
-        --  - findSheriffGun usa cache propio
-        --  - Sin pcall en el hot-path
+        --  ESP TAB
         -- ════════════════════════════════════════════════════════
-
         local espEnabledSheriff  = true
         local espEnabledMurder   = true
         local espEnabledInnocent = true
         local espEnabledGunFloor = true
         local gunFloorBillboard  = nil
-
-        -- Cache de roles por jugador
-        local roleCache = {}
-        local ROLE_CACHE_TTL = 0.4
+        local roleCache          = {}
+        local ROLE_CACHE_TTL     = 0.4
 
         local function getCachedRole(player)
             local entry = roleCache[player]
-            if entry and (tick() - entry.time) < ROLE_CACHE_TTL then
-                return entry.role
-            end
+            if entry and (tick() - entry.time) < ROLE_CACHE_TTL then return entry.role end
             local r = getRole(player)
             roleCache[player] = {role = r, time = tick()}
             return r
@@ -1136,191 +1122,92 @@ VerifyBtn.MouseButton1Click:Connect(function()
                 if obj.billboard and obj.billboard.Parent then obj.billboard:Destroy() end
             end
             espObjects = {}
-            if gunFloorBillboard and gunFloorBillboard.Parent then
-                gunFloorBillboard:Destroy()
-                gunFloorBillboard = nil
-            end
+            if gunFloorBillboard and gunFloorBillboard.Parent then gunFloorBillboard:Destroy() gunFloorBillboard = nil end
             roleCache = {}
         end
 
-        -- Crea el billboard de un jugador (solo una vez)
         local function createPlayerESP(player)
             if player == lp or espObjects[player] then return end
-
             local billboard = Instance.new("BillboardGui")
-            billboard.Size = UDim2.new(0, 150, 0, 50)
-            billboard.StudsOffset = Vector3.new(0, 3.5, 0)
-            billboard.AlwaysOnTop = true
-            billboard.Enabled = false
-            billboard.Parent = MainGui
-
+            billboard.Size = UDim2.new(0, 150, 0, 50) billboard.StudsOffset = Vector3.new(0, 3.5, 0)
+            billboard.AlwaysOnTop = true billboard.Enabled = false billboard.Parent = MainGui
             local bgFrame = Instance.new("Frame")
-            bgFrame.Size = UDim2.new(1, 0, 1, 0)
-            bgFrame.BackgroundColor3 = Color3.new(0, 0, 0)
-            bgFrame.BackgroundTransparency = 0.45
-            bgFrame.BorderSizePixel = 0
-            bgFrame.ZIndex = 1
-            bgFrame.Parent = billboard
+            bgFrame.Size = UDim2.new(1, 0, 1, 0) bgFrame.BackgroundColor3 = Color3.new(0,0,0)
+            bgFrame.BackgroundTransparency = 0.45 bgFrame.BorderSizePixel = 0 bgFrame.ZIndex = 1 bgFrame.Parent = billboard
             Instance.new("UICorner", bgFrame).CornerRadius = UDim.new(0, 6)
-
             local roleBar = Instance.new("Frame")
-            roleBar.Size = UDim2.new(0, 4, 1, 0)
-            roleBar.BackgroundColor3 = C.innocent
-            roleBar.BorderSizePixel = 0
-            roleBar.ZIndex = 2
-            roleBar.Parent = billboard
+            roleBar.Size = UDim2.new(0, 4, 1, 0) roleBar.BackgroundColor3 = C.innocent
+            roleBar.BorderSizePixel = 0 roleBar.ZIndex = 2 roleBar.Parent = billboard
             Instance.new("UICorner", roleBar).CornerRadius = UDim.new(0, 3)
-
             local nameLbl = Instance.new("TextLabel")
-            nameLbl.Size = UDim2.new(1, -8, 0.48, 0)
-            nameLbl.Position = UDim2.new(0, 6, 0, 0)
-            nameLbl.BackgroundTransparency = 1
-            nameLbl.Text = player.Name
-            nameLbl.TextColor3 = Color3.new(1, 1, 1)
-            nameLbl.TextScaled = true
-            nameLbl.Font = Enum.Font.GothamBold
-            nameLbl.TextStrokeTransparency = 0.3
-            nameLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
-            nameLbl.ZIndex = 3
-            nameLbl.Parent = billboard
-
+            nameLbl.Size = UDim2.new(1,-8,0.48,0) nameLbl.Position = UDim2.new(0,6,0,0)
+            nameLbl.BackgroundTransparency = 1 nameLbl.Text = player.Name nameLbl.TextColor3 = Color3.new(1,1,1)
+            nameLbl.TextScaled = true nameLbl.Font = Enum.Font.GothamBold
+            nameLbl.TextStrokeTransparency = 0.3 nameLbl.TextStrokeColor3 = Color3.new(0,0,0)
+            nameLbl.ZIndex = 3 nameLbl.Parent = billboard
             local roleLbl = Instance.new("TextLabel")
-            roleLbl.Size = UDim2.new(1, -8, 0.48, 0)
-            roleLbl.Position = UDim2.new(0, 6, 0.52, 0)
-            roleLbl.BackgroundTransparency = 1
-            roleLbl.Text = "[INOCENTE]"
-            roleLbl.TextColor3 = C.innocent
-            roleLbl.TextScaled = true
-            roleLbl.Font = Enum.Font.GothamBold
-            roleLbl.TextStrokeTransparency = 0.3
-            roleLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
-            roleLbl.ZIndex = 3
-            roleLbl.Parent = billboard
-
-            espObjects[player] = {
-                billboard = billboard,
-                roleBar   = roleBar,
-                roleLbl   = roleLbl,
-                lastRole  = "",
-            }
-
+            roleLbl.Size = UDim2.new(1,-8,0.48,0) roleLbl.Position = UDim2.new(0,6,0.52,0)
+            roleLbl.BackgroundTransparency = 1 roleLbl.Text = "[INOCENTE]" roleLbl.TextColor3 = C.innocent
+            roleLbl.TextScaled = true roleLbl.Font = Enum.Font.GothamBold
+            roleLbl.TextStrokeTransparency = 0.3 roleLbl.TextStrokeColor3 = Color3.new(0,0,0)
+            roleLbl.ZIndex = 3 roleLbl.Parent = billboard
+            espObjects[player] = {billboard=billboard, roleBar=roleBar, roleLbl=roleLbl, lastRole=""}
             player.AncestryChanged:Connect(function()
                 if not player:IsDescendantOf(game) then
                     if billboard.Parent then billboard:Destroy() end
-                    espObjects[player] = nil
-                    roleCache[player]  = nil
+                    espObjects[player] = nil roleCache[player] = nil
                 end
             end)
         end
 
-        -- Crea el billboard del arma (una sola vez)
         local function ensureGunBillboard()
             if gunFloorBillboard and gunFloorBillboard.Parent then return gunFloorBillboard end
-
             local bb = Instance.new("BillboardGui")
-            bb.Size = UDim2.new(0, 140, 0, 36)
-            bb.StudsOffset = Vector3.new(0, 2, 0)
-            bb.AlwaysOnTop = true
-            bb.Enabled = false
-            bb.Parent = MainGui
-
+            bb.Size = UDim2.new(0,140,0,36) bb.StudsOffset = Vector3.new(0,2,0)
+            bb.AlwaysOnTop = true bb.Enabled = false bb.Parent = MainGui
             local gbg = Instance.new("Frame")
-            gbg.Size = UDim2.new(1, 0, 1, 0)
-            gbg.BackgroundColor3 = Color3.new(0, 0, 0)
-            gbg.BackgroundTransparency = 0.45
-            gbg.BorderSizePixel = 0
-            gbg.ZIndex = 1
-            gbg.Parent = bb
-            Instance.new("UICorner", gbg).CornerRadius = UDim.new(0, 6)
-
+            gbg.Size = UDim2.new(1,0,1,0) gbg.BackgroundColor3 = Color3.new(0,0,0)
+            gbg.BackgroundTransparency = 0.45 gbg.BorderSizePixel = 0 gbg.ZIndex = 1 gbg.Parent = bb
+            Instance.new("UICorner", gbg).CornerRadius = UDim.new(0,6)
             local gbar = Instance.new("Frame")
-            gbar.Size = UDim2.new(0, 4, 1, 0)
-            gbar.BackgroundColor3 = C.gunFloor
-            gbar.BorderSizePixel = 0
-            gbar.ZIndex = 2
-            gbar.Parent = bb
-            Instance.new("UICorner", gbar).CornerRadius = UDim.new(0, 3)
-
+            gbar.Size = UDim2.new(0,4,1,0) gbar.BackgroundColor3 = C.gunFloor
+            gbar.BorderSizePixel = 0 gbar.ZIndex = 2 gbar.Parent = bb
+            Instance.new("UICorner", gbar).CornerRadius = UDim.new(0,3)
             local glbl = Instance.new("TextLabel")
-            glbl.Name = "GunLabel"
-            glbl.Size = UDim2.new(1, -8, 1, 0)
-            glbl.Position = UDim2.new(0, 8, 0, 0)
-            glbl.BackgroundTransparency = 1
-            glbl.Text = "[ARMA SHERIFF]"
-            glbl.TextColor3 = C.gunFloor
-            glbl.TextScaled = true
-            glbl.Font = Enum.Font.GothamBold
-            glbl.TextStrokeTransparency = 0.3
-            glbl.TextStrokeColor3 = Color3.new(0, 0, 0)
-            glbl.ZIndex = 3
-            glbl.Parent = bb
-
-            gunFloorBillboard = bb
-            return bb
+            glbl.Size = UDim2.new(1,-8,1,0) glbl.Position = UDim2.new(0,8,0,0)
+            glbl.BackgroundTransparency = 1 glbl.Text = "[ARMA SHERIFF]" glbl.TextColor3 = C.gunFloor
+            glbl.TextScaled = true glbl.Font = Enum.Font.GothamBold
+            glbl.TextStrokeTransparency = 0.3 glbl.TextStrokeColor3 = Color3.new(0,0,0)
+            glbl.ZIndex = 3 glbl.Parent = bb
+            gunFloorBillboard = bb return bb
         end
 
-        -- Loop ESP throttled: actualiza a ~20fps (cada 0.05s)
         local espLastUpdate = 0
-
         local function espTick()
             local now = tick()
             if now - espLastUpdate < 0.05 then return end
             espLastUpdate = now
-
-            -- Jugadores
             for player, obj in pairs(espObjects) do
                 local char = player.Character
                 if char then
                     local head = char:FindFirstChild("Head")
-                    if not head then
-                        obj.billboard.Enabled = false
-                        continue
-                    end
-
-                    local role = getCachedRole(player)
-                    local col  = roleColor(role)
-                    local icon = roleLabel(role)
-
-                    local showThis =
-                        (role == "sheriff"  and espEnabledSheriff)  or
-                        (role == "murder"   and espEnabledMurder)    or
-                        (role == "innocent" and espEnabledInnocent)
-
-                    obj.billboard.Adornee  = head
-                    obj.billboard.Enabled  = espEnabled and showThis
-
-                    -- Solo actualizar labels si el rol cambio
+                    if not head then obj.billboard.Enabled = false continue end
+                    local role = getCachedRole(player) local col = roleColor(role) local icon = roleLabel(role)
+                    local showThis = (role=="sheriff" and espEnabledSheriff) or (role=="murder" and espEnabledMurder) or (role=="innocent" and espEnabledInnocent)
+                    obj.billboard.Adornee = head obj.billboard.Enabled = espEnabled and showThis
                     if role ~= obj.lastRole then
-                        obj.roleBar.BackgroundColor3 = col
-                        obj.roleLbl.TextColor3       = col
-                        obj.roleLbl.Text             = "[" .. icon .. "]"
-                        obj.lastRole = role
+                        obj.roleBar.BackgroundColor3 = col obj.roleLbl.TextColor3 = col
+                        obj.roleLbl.Text = "[" .. icon .. "]" obj.lastRole = role
                     end
-                else
-                    obj.billboard.Enabled = false
-                end
+                else obj.billboard.Enabled = false end
             end
-
-            -- Arma en suelo (usa cache interno de findSheriffGun)
             if espEnabled and espEnabledGunFloor then
                 local gun = findSheriffGun()
                 if gun then
-                    local adornee = nil
-                    if gun:IsA("BasePart") then adornee = gun
-                    elseif gun:IsA("Model") or gun:IsA("Tool") then
-                        adornee = gun.PrimaryPart or gun:FindFirstChildOfClass("BasePart")
-                    end
-                    if adornee then
-                        local bb = ensureGunBillboard()
-                        bb.Adornee = adornee
-                        bb.Enabled = true
-                    end
-                else
-                    if gunFloorBillboard then gunFloorBillboard.Enabled = false end
-                end
-            elseif gunFloorBillboard then
-                gunFloorBillboard.Enabled = false
-            end
+                    local adornee = gun:IsA("BasePart") and gun or (gun.PrimaryPart or gun:FindFirstChildOfClass("BasePart"))
+                    if adornee then local bb = ensureGunBillboard() bb.Adornee = adornee bb.Enabled = true end
+                elseif gunFloorBillboard then gunFloorBillboard.Enabled = false end
+            elseif gunFloorBillboard then gunFloorBillboard.Enabled = false end
         end
 
         local function toggleESP(on)
@@ -1331,86 +1218,40 @@ VerifyBtn.MouseButton1Click:Connect(function()
                 toast("ESP ON", C.accentG)
             else
                 if espLoop then espLoop:Disconnect() espLoop = nil end
-                removeAllESP()
-                toast("ESP OFF", C.accentR)
+                removeAllESP() toast("ESP OFF", C.accentR)
             end
         end
+        Players.PlayerAdded:Connect(function(p) if espEnabled then task.wait(1) createPlayerESP(p) end end)
 
-        Players.PlayerAdded:Connect(function(p)
-            if espEnabled then task.wait(1) createPlayerESP(p) end
-        end)
-
-        -- UI ESP
         secTitle(espPage, "ESP Global", 10)
         mkToggle(espPage, "Enable ESP  (MM2)", 46, toggleESP)
-
         secTitle(espPage, "Tipos de ESP", 102)
 
         local function mkEspRow(parent, label, col, posY, initState, cb)
-            local row = Instance.new("Frame")
-            row.Size = UDim2.new(1, -20, 0, 44)
-            row.Position = UDim2.new(0, 10, 0, posY)
-            row.BackgroundColor3 = C.bg3
-            row.BorderSizePixel = 0
-            row.ZIndex = 5
-            row.Parent = parent
-            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 10)
-
-            local cbar = Instance.new("Frame")
-            cbar.Size = UDim2.new(0, 5, 1, 0)
-            cbar.BackgroundColor3 = col
-            cbar.BorderSizePixel = 0
-            cbar.ZIndex = 6
-            cbar.Parent = row
-            Instance.new("UICorner", cbar).CornerRadius = UDim.new(0, 4)
-
-            local lbl = Instance.new("TextLabel")
-            lbl.Size = UDim2.new(0.6, 0, 1, 0)
-            lbl.Position = UDim2.new(0, 18, 0, 0)
-            lbl.BackgroundTransparency = 1
-            lbl.Text = label
-            lbl.TextColor3 = col
-            lbl.TextScaled = true
-            lbl.Font = Enum.Font.GothamBold
-            lbl.TextXAlignment = Enum.TextXAlignment.Left
-            lbl.ZIndex = 6
-            lbl.Parent = row
-
-            local bg = Instance.new("Frame")
-            bg.Size = UDim2.new(0, 46, 0, 24)
-            bg.Position = UDim2.new(1, -58, 0.5, -12)
-            bg.BackgroundColor3 = initState and col or Color3.fromRGB(30,30,52)
-            bg.BorderSizePixel = 0
-            bg.ZIndex = 6
-            bg.Parent = row
-            Instance.new("UICorner", bg).CornerRadius = UDim.new(1, 0)
-
-            local circle = Instance.new("Frame")
-            circle.Size = UDim2.new(0, 18, 0, 18)
+            local row = Instance.new("Frame") row.Size = UDim2.new(1,-20,0,44) row.Position = UDim2.new(0,10,0,posY)
+            row.BackgroundColor3 = C.bg3 row.BorderSizePixel = 0 row.ZIndex = 5 row.Parent = parent
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0,10)
+            local cbar = Instance.new("Frame") cbar.Size = UDim2.new(0,5,1,0) cbar.BackgroundColor3 = col
+            cbar.BorderSizePixel = 0 cbar.ZIndex = 6 cbar.Parent = row
+            Instance.new("UICorner", cbar).CornerRadius = UDim.new(0,4)
+            local lbl = Instance.new("TextLabel") lbl.Size = UDim2.new(0.6,0,1,0) lbl.Position = UDim2.new(0,18,0,0)
+            lbl.BackgroundTransparency = 1 lbl.Text = label lbl.TextColor3 = col lbl.TextScaled = true
+            lbl.Font = Enum.Font.GothamBold lbl.TextXAlignment = Enum.TextXAlignment.Left lbl.ZIndex = 6 lbl.Parent = row
+            local bg = Instance.new("Frame") bg.Size = UDim2.new(0,46,0,24) bg.Position = UDim2.new(1,-58,0.5,-12)
+            bg.BackgroundColor3 = initState and col or Color3.fromRGB(30,30,52) bg.BorderSizePixel = 0 bg.ZIndex = 6 bg.Parent = row
+            Instance.new("UICorner", bg).CornerRadius = UDim.new(1,0)
+            local circle = Instance.new("Frame") circle.Size = UDim2.new(0,18,0,18)
             circle.Position = initState and UDim2.new(1,-21,0.5,-9) or UDim2.new(0,3,0.5,-9)
             circle.BackgroundColor3 = initState and Color3.new(1,1,1) or C.textDim
-            circle.BorderSizePixel = 0
-            circle.ZIndex = 7
-            circle.Parent = bg
-            Instance.new("UICorner", circle).CornerRadius = UDim.new(1, 0)
-
+            circle.BorderSizePixel = 0 circle.ZIndex = 7 circle.Parent = bg
+            Instance.new("UICorner", circle).CornerRadius = UDim.new(1,0)
             local state = initState
-            local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(1, 0, 1, 0)
-            btn.BackgroundTransparency = 1
-            btn.Text = ""
-            btn.ZIndex = 8
-            btn.Parent = bg
-
+            local btn = Instance.new("TextButton") btn.Size = UDim2.new(1,0,1,0) btn.BackgroundTransparency = 1
+            btn.Text = "" btn.ZIndex = 8 btn.Parent = bg
             btn.MouseButton1Click:Connect(function()
                 state = not state
-                TweenService:Create(bg, TweenInfo.new(0.18), {
-                    BackgroundColor3 = state and col or Color3.fromRGB(30,30,52)
-                }):Play()
-                TweenService:Create(circle, TweenInfo.new(0.18), {
-                    Position = state and UDim2.new(1,-21,0.5,-9) or UDim2.new(0,3,0.5,-9),
-                    BackgroundColor3 = state and Color3.new(1,1,1) or C.textDim,
-                }):Play()
+                TweenService:Create(bg, TweenInfo.new(0.18), {BackgroundColor3 = state and col or Color3.fromRGB(30,30,52)}):Play()
+                TweenService:Create(circle, TweenInfo.new(0.18), {Position = state and UDim2.new(1,-21,0.5,-9) or UDim2.new(0,3,0.5,-9), BackgroundColor3 = state and Color3.new(1,1,1) or C.textDim}):Play()
                 cb(state)
             end)
         end
@@ -1423,67 +1264,146 @@ VerifyBtn.MouseButton1Click:Connect(function()
             if not on and gunFloorBillboard then gunFloorBillboard.Enabled = false end
         end)
 
-        local espInfo = Instance.new("TextLabel")
-        espInfo.Size = UDim2.new(1, -20, 0, 60)
-        espInfo.Position = UDim2.new(0, 10, 0, 360)
-        espInfo.BackgroundColor3 = C.bg3
-        espInfo.TextColor3 = C.textDim
-        espInfo.Text = "  Roles detectados via tools (Knife / Revolver)\n  y por valores de rol en el personaje.\n  Actualizacion: ~20fps para menor lag."
-        espInfo.TextScaled = true
-        espInfo.Font = Enum.Font.Gotham
-        espInfo.TextXAlignment = Enum.TextXAlignment.Left
-        espInfo.TextYAlignment = Enum.TextYAlignment.Top
-        espInfo.BorderSizePixel = 0
-        espInfo.ZIndex = 5
-        espInfo.Parent = espPage
-        Instance.new("UICorner", espInfo).CornerRadius = UDim.new(0, 10)
-        local eip = Instance.new("UIPadding", espInfo)
-        eip.PaddingTop  = UDim.new(0, 8)
-        eip.PaddingLeft = UDim.new(0, 6)
+        -- ════════════════════════════════════════════════════════
+        --  HITBOX TAB
+        -- ════════════════════════════════════════════════════════
+        secTitle(hbPage, "Hitbox Expander", 10)
+
+        -- Info de tamaño actual
+        local hbSizeLbl = Instance.new("TextLabel")
+        hbSizeLbl.Size = UDim2.new(1, -20, 0, 34)
+        hbSizeLbl.Position = UDim2.new(0, 10, 0, 44)
+        hbSizeLbl.BackgroundColor3 = C.bg3
+        hbSizeLbl.TextColor3 = C.hitbox
+        hbSizeLbl.Text = "  Tamano actual: " .. HITBOX_SIZE .. " studs"
+        hbSizeLbl.TextScaled = true
+        hbSizeLbl.Font = Enum.Font.GothamBold
+        hbSizeLbl.TextXAlignment = Enum.TextXAlignment.Left
+        hbSizeLbl.BorderSizePixel = 0
+        hbSizeLbl.ZIndex = 5
+        hbSizeLbl.Parent = hbPage
+        Instance.new("UICorner", hbSizeLbl).CornerRadius = UDim.new(0, 8)
+
+        -- Toggle hitbox expander
+        mkToggle(hbPage, "Enable Hitbox Expander", 88, function(on)
+            hitboxEnabled = on
+            if on then
+                -- Aplica hitbox de inmediato y mantiene en loop (por si respawnean)
+                applyHitboxes()
+                hitboxLoop = RunService.Heartbeat:Connect(function()
+                    applyHitboxes()
+                end)
+                toast("Hitbox ON: " .. HITBOX_SIZE .. " studs", C.hitbox)
+            else
+                if hitboxLoop then hitboxLoop:Disconnect() hitboxLoop = nil end
+                removeAllHitboxes()
+                toast("Hitbox OFF", C.accentR)
+            end
+        end)
+
+        -- Slider de tamaño (2 a 50 studs)
+        mkSlider(hbPage, "Tamano Hitbox (studs)", 140, 2, 50, HITBOX_SIZE, function(v)
+            HITBOX_SIZE = v
+            hbSizeLbl.Text = "  Tamano actual: " .. v .. " studs"
+        end)
+
+        secTitle(hbPage, "Hit Detection", 216)
+
+        -- Toggle deteccion de hits
+        mkToggle(hbPage, "Enable Hit Detection", 252, function(on)
+            hitDetectEnabled = on
+            if on then
+                local lastTick = 0
+                hitDetectLoop = RunService.Heartbeat:Connect(function()
+                    local now = tick()
+                    if now - lastTick < 0.05 then return end  -- ~20fps
+                    lastTick = now
+                    runHitDetection()
+                end)
+                toast("Hit Detection ON", C.accentG)
+            else
+                if hitDetectLoop then hitDetectLoop:Disconnect() hitDetectLoop = nil end
+                toast("Hit Detection OFF", C.accentR)
+            end
+        end)
+
+        -- Slider cooldown (0.1s a 5s, representado como 1-50 * 0.1)
+        mkSlider(hbPage, "Cooldown entre hits (x0.1s)", 310, 1, 50, math.round(HIT_COOLDOWN * 10), function(v)
+            HIT_COOLDOWN = v * 0.1
+            hitCooldowns = {}  -- resetea cooldowns al cambiar el valor
+        end)
+
+        -- Log del ultimo hit
+        local hitLogFrame = Instance.new("Frame")
+        hitLogFrame.Size = UDim2.new(1, -20, 0, 42)
+        hitLogFrame.Position = UDim2.new(0, 10, 0, 386)
+        hitLogFrame.BackgroundColor3 = C.bg3
+        hitLogFrame.BorderSizePixel = 0
+        hitLogFrame.ZIndex = 5
+        hitLogFrame.Parent = hbPage
+        Instance.new("UICorner", hitLogFrame).CornerRadius = UDim.new(0, 10)
+        local hitLogBar = Instance.new("Frame")
+        hitLogBar.Size = UDim2.new(0, 4, 1, 0) hitLogBar.BackgroundColor3 = C.hitbox
+        hitLogBar.BorderSizePixel = 0 hitLogBar.ZIndex = 6 hitLogBar.Parent = hitLogFrame
+        Instance.new("UICorner", hitLogBar).CornerRadius = UDim.new(0, 4)
+        hitLogLbl = Instance.new("TextLabel")
+        hitLogLbl.Size = UDim2.new(1, -16, 1, 0) hitLogLbl.Position = UDim2.new(0, 14, 0, 0)
+        hitLogLbl.BackgroundTransparency = 1 hitLogLbl.Text = "Ultimo hit: ninguno"
+        hitLogLbl.TextColor3 = C.textDim hitLogLbl.TextScaled = true hitLogLbl.Font = Enum.Font.Gotham
+        hitLogLbl.TextXAlignment = Enum.TextXAlignment.Left hitLogLbl.ZIndex = 6 hitLogLbl.Parent = hitLogFrame
+
+        -- Boton para resetear cooldowns manualmente
+        mkButton(hbPage, "Resetear Cooldowns", 438, C.accentB, function()
+            hitCooldowns = {}
+            toast("Cooldowns reseteados", C.accentB)
+        end)
+
+        -- Info/ayuda
+        local hbInfo = Instance.new("TextLabel")
+        hbInfo.Size = UDim2.new(1, -20, 0, 72)
+        hbInfo.Position = UDim2.new(0, 10, 0, 492)
+        hbInfo.BackgroundColor3 = C.bg3
+        hbInfo.TextColor3 = C.textDim
+        hbInfo.Text = "  Hitbox Expander: agranda el HRP de enemigos.\n  Hit Detection: notifica cuando hay un enemigo\n  dentro del cubo de tamano HITBOX_SIZE.\n  Ambos ignoran al jugador local."
+        hbInfo.TextScaled = true
+        hbInfo.Font = Enum.Font.Gotham
+        hbInfo.TextXAlignment = Enum.TextXAlignment.Left
+        hbInfo.TextYAlignment = Enum.TextYAlignment.Top
+        hbInfo.BorderSizePixel = 0
+        hbInfo.ZIndex = 5
+        hbInfo.Parent = hbPage
+        Instance.new("UICorner", hbInfo).CornerRadius = UDim.new(0, 10)
+        local hip = Instance.new("UIPadding", hbInfo)
+        hip.PaddingTop = UDim.new(0, 8) hip.PaddingLeft = UDim.new(0, 6)
 
         -- ════════════════════════════════════════
         --  MISC TAB
         -- ════════════════════════════════════════
         secTitle(miscPage, "UI Controls", 10)
         local hkLbl = Instance.new("TextLabel")
-        hkLbl.Size = UDim2.new(1, -20, 0, 32)
-        hkLbl.Position = UDim2.new(0, 10, 0, 46)
-        hkLbl.BackgroundColor3 = C.bg3
-        hkLbl.TextColor3 = C.textDim
-        hkLbl.Text = "  Hide Key: RightShift"
-        hkLbl.TextScaled = true
-        hkLbl.Font = Enum.Font.Gotham
-        hkLbl.TextXAlignment = Enum.TextXAlignment.Left
-        hkLbl.BorderSizePixel = 0
-        hkLbl.ZIndex = 5
-        hkLbl.Parent = miscPage
+        hkLbl.Size = UDim2.new(1, -20, 0, 32) hkLbl.Position = UDim2.new(0, 10, 0, 46)
+        hkLbl.BackgroundColor3 = C.bg3 hkLbl.TextColor3 = C.textDim hkLbl.Text = "  Hide Key: RightShift"
+        hkLbl.TextScaled = true hkLbl.Font = Enum.Font.Gotham hkLbl.TextXAlignment = Enum.TextXAlignment.Left
+        hkLbl.BorderSizePixel = 0 hkLbl.ZIndex = 5 hkLbl.Parent = miscPage
         Instance.new("UICorner", hkLbl).CornerRadius = UDim.new(0, 8)
 
         local changingKey = false
         local ckBtn = mkButton(miscPage, "Cambiar Tecla", 88, C.accent, function()
-            changingKey = true
-            ckBtn.Text = "Presiona una tecla..."
+            changingKey = true ckBtn.Text = "Presiona una tecla..."
             TweenService:Create(ckBtn, TweenInfo.new(0.2), {BackgroundColor3 = C.accentY}):Play()
         end)
 
         secTitle(miscPage, "Visuals", 144)
         mkToggle(miscPage, "Fullbright", 180, function(on)
-            Lighting.Brightness = on and 8 or 1
-            Lighting.FogEnd = on and 9e8 or 100000
+            Lighting.Brightness = on and 8 or 1 Lighting.FogEnd = on and 9e8 or 100000
             for _, v in pairs(Lighting:GetChildren()) do
-                if v:IsA("ColorCorrectionEffect") or v:IsA("BloomEffect") or v:IsA("BlurEffect") then
-                    v.Enabled = not on
-                end
+                if v:IsA("ColorCorrectionEffect") or v:IsA("BloomEffect") or v:IsA("BlurEffect") then v.Enabled = not on end
             end
             toast(on and "Fullbright ON" or "Fullbright OFF", on and C.accentG or C.accentR)
         end)
         mkToggle(miscPage, "Invisible (Local)", 232, function(on)
             local c = lp.Character
-            if c then
-                for _, p in pairs(c:GetDescendants()) do
-                    if p:IsA("BasePart") or p:IsA("Decal") then p.Transparency = on and 1 or 0 end
-                end
-            end
+            if c then for _, p in pairs(c:GetDescendants()) do if p:IsA("BasePart") or p:IsA("Decal") then p.Transparency = on and 1 or 0 end end end
             toast(on and "Invisible ON" or "Invisible OFF", on and C.accentG or C.accentR)
         end)
 
@@ -1494,79 +1414,58 @@ VerifyBtn.MouseButton1Click:Connect(function()
         MinBtn.MouseButton1Click:Connect(function()
             minimized = not minimized
             if minimized then
-                for _, child in pairs(Main:GetChildren()) do
-                    if child ~= MinBtn then child.Visible = false end
-                end
+                for _, child in pairs(Main:GetChildren()) do if child ~= MinBtn then child.Visible = false end end
                 TweenService:Create(Main, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-                    Size     = UDim2.new(0, 46, 0, 46),
-                    Position = UDim2.new(1, -60, 0, 12),
+                    Size = UDim2.new(0,46,0,46), Position = UDim2.new(1,-60,0,12),
                 }):Play()
-                MinBtn.Text = "="
-                TweenService:Create(MinBtn, TweenInfo.new(0.15), {BackgroundColor3 = C.accent}):Play()
-                MinBtn.Position = UDim2.new(0, 6, 0, 6)
+                MinBtn.Text = "=" TweenService:Create(MinBtn, TweenInfo.new(0.15), {BackgroundColor3 = C.accent}):Play()
+                MinBtn.Position = UDim2.new(0,6,0,6)
             else
                 TweenService:Create(Main, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                    Size     = UDim2.new(0, 620, 0, 430),
-                    Position = UDim2.new(0.5, -310, 0.5, -215),
+                    Size = UDim2.new(0,640,0,430), Position = UDim2.new(0.5,-320,0.5,-215),
                 }):Play()
                 task.wait(0.18)
                 for _, child in pairs(Main:GetChildren()) do child.Visible = true end
-                MinBtn.Text = "X"
-                TweenService:Create(MinBtn, TweenInfo.new(0.15), {BackgroundColor3 = C.accentR}):Play()
-                MinBtn.Position = UDim2.new(1, -46, 0.5, -17)
+                MinBtn.Text = "X" TweenService:Create(MinBtn, TweenInfo.new(0.15), {BackgroundColor3 = C.accentR}):Play()
+                MinBtn.Position = UDim2.new(1,-46,0.5,-17)
             end
         end)
 
         UserInputService.InputBegan:Connect(function(input, gpe)
             if changingKey and input.UserInputType == Enum.UserInputType.Keyboard then
-                hideKey = input.KeyCode
-                hkLbl.Text = "  Hide Key: " .. input.KeyCode.Name
-                ckBtn.Text = "Cambiar Tecla"
-                TweenService:Create(ckBtn, TweenInfo.new(0.2), {BackgroundColor3 = C.accent}):Play()
-                changingKey = false
-                toast("Tecla: " .. input.KeyCode.Name, C.accentB)
-            elseif not changingKey
-                and input.UserInputType == Enum.UserInputType.Keyboard
-                and input.KeyCode == hideKey then
-                uiVisible = not uiVisible
-                Main.Visible = uiVisible
+                hideKey = input.KeyCode hkLbl.Text = "  Hide Key: " .. input.KeyCode.Name
+                ckBtn.Text = "Cambiar Tecla" TweenService:Create(ckBtn, TweenInfo.new(0.2), {BackgroundColor3 = C.accent}):Play()
+                changingKey = false toast("Tecla: " .. input.KeyCode.Name, C.accentB)
+            elseif not changingKey and input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == hideKey then
+                uiVisible = not uiVisible Main.Visible = uiVisible
             end
         end)
 
         local dragging, dStart, dPos
         Header.InputBegan:Connect(function(i)
-            if i.UserInputType == Enum.UserInputType.MouseButton1
-            or i.UserInputType == Enum.UserInputType.Touch then
+            if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
                 dragging = true dStart = i.Position dPos = Main.Position
             end
         end)
         Header.InputEnded:Connect(function(i)
-            if i.UserInputType == Enum.UserInputType.MouseButton1
-            or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+            if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
         end)
         UserInputService.InputChanged:Connect(function(i)
-            if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement
-            or i.UserInputType == Enum.UserInputType.Touch) then
+            if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
                 local d = i.Position - dStart
-                Main.Position = UDim2.new(
-                    dPos.X.Scale, dPos.X.Offset + d.X,
-                    dPos.Y.Scale, dPos.Y.Offset + d.Y
-                )
+                Main.Position = UDim2.new(dPos.X.Scale, dPos.X.Offset + d.X, dPos.Y.Scale, dPos.Y.Offset + d.Y)
             end
         end)
 
         toast("Diogo Script MM2 cargado!", C.accent)
 
     else
-        KStatus.TextColor3 = C.accentR
-        KStatus.Text = "Key incorrecta."
+        KStatus.TextColor3 = C.accentR KStatus.Text = "Key incorrecta."
         for i = 1, 3 do
-            TweenService:Create(KF, TweenInfo.new(0.05), {Position = UDim2.new(0.5, 10, 0.5, 0)}):Play()
-            task.wait(0.06)
-            TweenService:Create(KF, TweenInfo.new(0.05), {Position = UDim2.new(0.5, -10, 0.5, 0)}):Play()
-            task.wait(0.06)
+            TweenService:Create(KF, TweenInfo.new(0.05), {Position = UDim2.new(0.5,10,0.5,0)}):Play() task.wait(0.06)
+            TweenService:Create(KF, TweenInfo.new(0.05), {Position = UDim2.new(0.5,-10,0.5,0)}):Play() task.wait(0.06)
         end
-        TweenService:Create(KF, TweenInfo.new(0.1),  {Position = UDim2.new(0.5, 0, 0.5, 0)}):Play()
+        TweenService:Create(KF, TweenInfo.new(0.1),  {Position = UDim2.new(0.5,0,0.5,0)}):Play()
         TweenService:Create(KStr, TweenInfo.new(0.2), {Color = C.accentR}):Play()
         task.wait(1.2)
         TweenService:Create(KStr, TweenInfo.new(0.4), {Color = C.accent}):Play()
