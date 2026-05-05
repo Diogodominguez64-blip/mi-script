@@ -1,337 +1,193 @@
 --[[
-    FPs ADAPTIVE AIMBOT & ESP FRAMEWORK
-    Design: Rayfield UI
-    Rendering: Drawing API (100% Functional)
-]]--
+    DZ HUB - GROUNDWORK EDITION (XENO EXECUTOR)
+    Target: [FPS] Lanzamiento / FP2
+    Design: Fluent Modern
+]]
 
-local Rayfield = loadstring(game:HttpGet('https://sirbloodhound.github.io/Rayfield/source'))()
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
+local Window = Fluent:CreateWindow({
+    Title = "DZ HUB | Frontlines 2 & Groundwork",
+    SubTitle = "Xeno Executor Optimized",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.RightShift 
+})
+
+-- // Variables
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
-local Mouse = LocalPlayer:GetMouse()
+local Camera = workspace.CurrentCamera
 
--- [ Configuration ] --
-local Config = {
-    Aimbot = {
-        Enabled = false,
-        Key = Enum.UserInputType.MouseButton2,
-        Smoothness = 0.5,
-        AimPart = "Head",
-        FOV = 100,
-        ShowFOV = false,
-        WallCheck = true
-    },
-    ESP = {
-        Enabled = false,
-        Boxes = false,
-        Names = false,
-        Health = false,
-        Tracers = false,
-        MaxDistance = 1500,
-        Color = Color3.fromRGB(255, 65, 65)
-    }
+getgenv().Toggled = false
+getgenv().AimbotConfig = {
+    Enabled = false,
+    TeamCheck = true,
+    AliveCheck = true,
+    WallCheck = true,
+    Smoothness = 0.4, -- Lower is faster
+    FOV = 120,
+    AimPart = "Head"
 }
 
--- [ FOV Circle ] --
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-FOVCircle.Radius = Config.Aimbot.FOV
-FOVCircle.Filled = false
-FOVCircle.Color = Color3.fromRGB(255, 255, 255)
-FOVCircle.Visible = false
-FOVCircle.Thickness = 1
+getgenv().ESPConfig = {
+    Enabled = false,
+    Boxes = false,
+    Names = false,
+    Distance = false,
+    Tracers = false,
+    MaxDistance = 2000
+}
 
--- [ Utility Functions ] --
-
--- Custom Character Finder (Crucial for FP2)
-local function GetCharacter(player)
-    if player.Character then return player.Character end
-    -- If FP2 uses a custom workspace folder for models, it scans for models matching the player's name
-    local customChar = workspace:FindFirstChild(player.Name) 
-    if customChar and customChar:IsA("Model") then return customChar end
-    return nil
+-- // Utility Functions
+local function IsVisible(part, character)
+    if not getgenv().AimbotConfig.WallCheck then return true end
+    local ray = Ray.new(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position).Unit * 1000)
+    local hit, pos = workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, Camera, character})
+    return hit == nil
 end
 
-local function IsAlive(character)
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if humanoid and humanoid.Health > 0 then return true end
-    -- FP2 Custom Health check fallback
-    local healthVal = character:FindFirstChild("Health")
-    if healthVal and healthVal:IsA("NumberValue") and healthVal.Value > 0 then return true end
-    return false
-end
-
-local function WallCheck(destination, ignoreList)
-    if not Config.Aimbot.WallCheck then return true end
-    local origin = Camera.CFrame.Position
-    local direction = destination - origin
+local function GetClosestPlayer()
+    local closestDistance = getgenv().AimbotConfig.FOV
+    local target = nil
     
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterDescendantsInstances = ignoreList
-    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-    raycastParams.IgnoreWater = true
-
-    local result = workspace:Raycast(origin, direction, raycastParams)
-    return result == nil
-end
-
-local function GetClosestTarget()
-    local closestDistance = Config.Aimbot.FOV
-    local closestTarget = nil
-    local mousePos = UserInputService:GetMouseLocation()
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local character = GetCharacter(player)
-            if character and IsAlive(character) then
-                local targetPart = character:FindFirstChild(Config.Aimbot.AimPart) or character:FindFirstChild("HumanoidRootPart")
-                if targetPart then
-                    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and (not getgenv().AimbotConfig.TeamCheck or player.Team ~= LocalPlayer.Team) then
+            -- Groundwork games sometimes put characters in different workspace folders
+            local char = player.Character or workspace:FindFirstChild(player.Name)
+            if char and char:FindFirstChild(getgenv().AimbotConfig.AimPart) then
+                local part = char[getgenv().AimbotConfig.AimPart]
+                local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                
+                if onScreen and IsVisible(part, char) then
+                    local mouseLocation = UserInputService:GetMouseLocation()
+                    local distance = (Vector2.new(screenPos.X, screenPos.Y) - mouseLocation).Magnitude
                     
-                    if onScreen then
-                        local distance = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                        if distance < closestDistance then
-                            -- Wallcheck
-                            local ignoreList = {GetCharacter(LocalPlayer), Camera}
-                            if WallCheck(targetPart.Position, ignoreList) then
-                                closestDistance = distance
-                                closestTarget = targetPart
-                            end
-                        end
+                    if distance < closestDistance then
+                        closestDistance = distance
+                        target = part
                     end
                 end
             end
         end
     end
-    return closestTarget
+    return target
 end
 
--- [ Aimbot Logic ] --
-local Aiming = false
-
-UserInputService.InputBegan:Connect(function(input)
-    if input.UserInputType == Config.Aimbot.Key then Aiming = true end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Config.Aimbot.Key then Aiming = false end
-end)
-
+-- // Aimbot Logic (Xeno mousemoverel)
 RunService.RenderStepped:Connect(function()
-    -- Update FOV
-    FOVCircle.Position = UserInputService:GetMouseLocation()
-    FOVCircle.Radius = Config.Aimbot.FOV
-    FOVCircle.Visible = Config.Aimbot.ShowFOV
-
-    if Config.Aimbot.Enabled and Aiming then
-        local target = GetClosestTarget()
+    if getgenv().AimbotConfig.Enabled and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+        local target = GetClosestPlayer()
         if target then
-            local targetPos, onScreen = Camera:WorldToViewportPoint(target.Position)
+            local screenPos, onScreen = Camera:WorldToViewportPoint(target.Position)
+            local mouseLocation = UserInputService:GetMouseLocation()
+            
             if onScreen then
-                local mouseLocation = UserInputService:GetMouseLocation()
-                local moveVector = Vector2.new((targetPos.X - mouseLocation.X) * Config.Aimbot.Smoothness, (targetPos.Y - mouseLocation.Y) * Config.Aimbot.Smoothness)
-                
-                -- Use mousemoverel for custom FPS cameras (better than CFrame manipulation)
-                if mousemoverel then
-                    mousemoverel(moveVector.X, moveVector.Y)
-                end
+                local x = (screenPos.X - mouseLocation.X) * getgenv().AimbotConfig.Smoothness
+                local y = (screenPos.Y - mouseLocation.Y) * getgenv().AimbotConfig.Smoothness
+                mousemoverel(x, y)
             end
         end
     end
 end)
 
--- [ ESP Logic ] --
-local ESP_Objects = {}
+-- // ESP Library (Drawing API)
+local ESP_Folder = {}
 
 local function CreateESP(player)
-    local esp = {
+    local drawings = {
         Box = Drawing.new("Square"),
         Name = Drawing.new("Text"),
-        Health = Drawing.new("Text"),
-        Tracer = Drawing.new("Line"),
-        Player = player
+        Tracer = Drawing.new("Line")
     }
     
-    esp.Box.Thickness = 1
-    esp.Box.Filled = false
-    esp.Name.Size = 16
-    esp.Name.Center = true
-    esp.Name.Outline = true
-    esp.Health.Size = 14
-    esp.Health.Center = true
-    esp.Health.Outline = true
-    esp.Tracer.Thickness = 1
+    drawings.Box.Visible = false
+    drawings.Box.Color = Color3.fromRGB(255, 0, 0)
+    drawings.Box.Thickness = 1
     
-    ESP_Objects[player] = esp
+    drawings.Name.Visible = false
+    drawings.Name.Color = Color3.fromRGB(255, 255, 255)
+    drawings.Name.Size = 14
+    drawings.Name.Center = true
+    drawings.Name.Outline = true
+    
+    drawings.Tracer.Visible = false
+    drawings.Tracer.Color = Color3.fromRGB(255, 0, 0)
+    drawings.Tracer.Thickness = 1
+
+    ESP_Folder[player] = drawings
 end
 
-local function RemoveESP(player)
-    if ESP_Objects[player] then
-        for _, drawing in pairs(ESP_Objects[player]) do
-            if typeof(drawing) == "table" and drawing.Remove then drawing:Remove() end
-        end
-        ESP_Objects[player] = nil
-    end
-end
-
-for _, player in ipairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer then CreateESP(player) end
-end
-
-Players.PlayerAdded:Connect(function(player) CreateESP(player) end)
-Players.PlayerRemoving:Connect(function(player) RemoveESP(player) end)
-
-RunService.RenderStepped:Connect(function()
-    for player, esp in pairs(ESP_Objects) do
-        local character = GetCharacter(player)
-        if Config.ESP.Enabled and character and IsAlive(character) then
-            local rootPart = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("UpperTorso")
-            local head = character:FindFirstChild("Head")
+local function UpdateESP()
+    for player, drawing in pairs(ESP_Folder) do
+        local char = player.Character or workspace:FindFirstChild(player.Name)
+        if getgenv().ESPConfig.Enabled and char and char:FindFirstChild("HumanoidRootPart") then
+            local root = char.HumanoidRootPart
+            local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+            local distance = (Camera.CFrame.Position - root.Position).Magnitude
             
-            if rootPart and head then
-                local rootPos, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
-                local headPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
-                local legPos = Camera:WorldToViewportPoint(rootPart.Position - Vector3.new(0, 3, 0))
+            if onScreen and distance < getgenv().ESPConfig.MaxDistance then
+                local sizeX = 2000 / screenPos.Z
+                local sizeY = 3000 / screenPos.Z
                 
-                local distance = (Camera.CFrame.Position - rootPart.Position).Magnitude
+                if getgenv().ESPConfig.Boxes then
+                    drawing.Box.Visible = true
+                    drawing.Box.Size = Vector2.new(sizeX, sizeY)
+                    drawing.Box.Position = Vector2.new(screenPos.X - sizeX / 2, screenPos.Y - sizeY / 2)
+                else drawing.Box.Visible = false end
                 
-                if onScreen and distance <= Config.ESP.MaxDistance then
-                    local height = math.abs(headPos.Y - legPos.Y)
-                    local width = height / 2
-                    
-                    -- Box
-                    esp.Box.Size = Vector2.new(width, height)
-                    esp.Box.Position = Vector2.new(rootPos.X - width / 2, rootPos.Y - height / 2)
-                    esp.Box.Color = Config.ESP.Color
-                    esp.Box.Visible = Config.ESP.Boxes
-                    
-                    -- Name
-                    esp.Name.Text = player.Name .. " [" .. math.floor(distance) .. "m]"
-                    esp.Name.Position = Vector2.new(rootPos.X, rootPos.Y - height / 2 - 20)
-                    esp.Name.Color = Config.ESP.Color
-                    esp.Name.Visible = Config.ESP.Names
-                    
-                    -- Tracers
-                    esp.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                    esp.Tracer.To = Vector2.new(rootPos.X, rootPos.Y - height / 2)
-                    esp.Tracer.Color = Config.ESP.Color
-                    esp.Tracer.Visible = Config.ESP.Tracers
-                    
-                    -- Health
-                    local humanoid = character:FindFirstChildOfClass("Humanoid")
-                    if humanoid then
-                        esp.Health.Text = tostring(math.floor(humanoid.Health)) .. " HP"
-                        esp.Health.Position = Vector2.new(rootPos.X, rootPos.Y + height / 2 + 5)
-                        esp.Health.Color = Color3.fromRGB(0, 255, 0)
-                        esp.Health.Visible = Config.ESP.Health
-                    else
-                        esp.Health.Visible = false
-                    end
-                else
-                    esp.Box.Visible = false
-                    esp.Name.Visible = false
-                    esp.Health.Visible = false
-                    esp.Tracer.Visible = false
-                end
+                if getgenv().ESPConfig.Names then
+                    drawing.Name.Visible = true
+                    drawing.Name.Text = player.Name .. (getgenv().ESPConfig.Distance and " ["..math.floor(distance).."m]" or "")
+                    drawing.Name.Position = Vector2.new(screenPos.X, screenPos.Y - sizeY / 2 - 15)
+                else drawing.Name.Visible = false end
+                
+                if getgenv().ESPConfig.Tracers then
+                    drawing.Tracer.Visible = true
+                    drawing.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                    drawing.Tracer.To = Vector2.new(screenPos.X, screenPos.Y + sizeY / 2)
+                else drawing.Tracer.Visible = false end
+            else
+                drawing.Box.Visible = false
+                drawing.Name.Visible = false
+                drawing.Tracer.Visible = false
             end
         else
-            esp.Box.Visible = false
-            esp.Name.Visible = false
-            esp.Health.Visible = false
-            esp.Tracer.Visible = false
+            drawing.Box.Visible = false
+            drawing.Name.Visible = false
+            drawing.Tracer.Visible = false
         end
     end
-end)
+end
 
--- [ UI Setup ] --
-local Window = Rayfield:CreateWindow({
-    Name = "FP2 Adaptive Hub | V2",
-    LoadingTitle = "Initializing Scripts...",
-    LoadingSubtitle = "By Your Favorite AI",
-    ConfigurationSaving = { Enabled = false },
-    KeySystem = false
-})
+RunService.RenderStepped:Connect(UpdateESP)
+for _, p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer then CreateESP(p) end end
+Players.PlayerAdded:Connect(CreateESP)
 
-local CombatTab = Window:CreateTab("Combat", 4483362458)
-local VisualsTab = Window:CreateTab("Visuals", 4483362458)
+-- // Tabs
+local Tabs = {
+    Combat = Window:AddTab({ Title = "Combat", Icon = "crosshair" }),
+    Visuals = Window:AddTab({ Title = "Visuals", Icon = "eye" })
+}
 
--- Combat Elements
-CombatTab:CreateToggle({
-    Name = "Enable Aimbot",
-    CurrentValue = false,
-    Flag = "AimToggle",
-    Callback = function(Value) Config.Aimbot.Enabled = Value end,
-})
+-- // Combat UI
+Tabs.Combat:AddToggle("AimActive", {Title = "Enable Aimbot", Default = false}):OnChanged(function(v) getgenv().AimbotConfig.Enabled = v end)
+Tabs.Combat:AddToggle("WallCheck", {Title = "Wall Check", Default = true}):OnChanged(function(v) getgenv().AimbotConfig.WallCheck = v end)
+Tabs.Combat:AddSlider("Smoothness", {Title = "Smoothness", Min = 0.1, Max = 1, Default = 0.4, Rounding = 1}):OnChanged(function(v) getgenv().AimbotConfig.Smoothness = v end)
+Tabs.Combat:AddSlider("FOV", {Title = "FOV Size", Min = 50, Max = 800, Default = 120, Rounding = 0}):OnChanged(function(v) getgenv().AimbotConfig.FOV = v end)
+Tabs.Combat:AddDropdown("Part", {Title = "Aim Part", Values = {"Head", "HumanoidRootPart"}, Default = "Head"}):OnChanged(function(v) getgenv().AimbotConfig.AimPart = v end)
 
-CombatTab:CreateToggle({
-    Name = "Show FOV",
-    CurrentValue = false,
-    Flag = "FOVToggle",
-    Callback = function(Value) Config.Aimbot.ShowFOV = Value end,
-})
+-- // Visuals UI
+Tabs.Visuals:AddToggle("ESPActive", {Title = "Master ESP", Default = false}):OnChanged(function(v) getgenv().ESPConfig.Enabled = v end)
+Tabs.Visuals:AddToggle("ESPBox", {Title = "Boxes", Default = false}):OnChanged(function(v) getgenv().ESPConfig.Boxes = v end)
+Tabs.Visuals:AddToggle("ESPNames", {Title = "Names", Default = false}):OnChanged(function(v) getgenv().ESPConfig.Names = v end)
+Tabs.Visuals:AddToggle("ESPDist", {Title = "Distance", Default = false}):OnChanged(function(v) getgenv().ESPConfig.Distance = v end)
+Tabs.Visuals:AddToggle("ESPTracers", {Title = "Tracers", Default = false}):OnChanged(function(v) getgenv().ESPConfig.Tracers = v end)
 
-CombatTab:CreateToggle({
-    Name = "Wall Check",
-    CurrentValue = true,
-    Flag = "WallToggle",
-    Callback = function(Value) Config.Aimbot.WallCheck = Value end,
-})
-
-CombatTab:CreateSlider({
-    Name = "FOV Size",
-    Range = {10, 500},
-    Increment = 10,
-    CurrentValue = 100,
-    Flag = "FOVSize",
-    Callback = function(Value) Config.Aimbot.FOV = Value end,
-})
-
-CombatTab:CreateSlider({
-    Name = "Smoothness",
-    Range = {0.1, 1},
-    Increment = 0.1,
-    CurrentValue = 0.5,
-    Flag = "Smoothness",
-    Callback = function(Value) Config.Aimbot.Smoothness = Value end,
-})
-
--- Visuals Elements
-VisualsTab:CreateToggle({
-    Name = "Enable ESP",
-    CurrentValue = false,
-    Flag = "ESPToggle",
-    Callback = function(Value) Config.ESP.Enabled = Value end,
-})
-
-VisualsTab:CreateToggle({
-    Name = "Show Boxes",
-    CurrentValue = false,
-    Flag = "BoxToggle",
-    Callback = function(Value) Config.ESP.Boxes = Value end,
-})
-
-VisualsTab:CreateToggle({
-    Name = "Show Names",
-    CurrentValue = false,
-    Flag = "NameToggle",
-    Callback = function(Value) Config.ESP.Names = Value end,
-})
-
-VisualsTab:CreateToggle({
-    Name = "Show Health",
-    CurrentValue = false,
-    Flag = "HealthToggle",
-    Callback = function(Value) Config.ESP.Health = Value end,
-})
-
-VisualsTab:CreateToggle({
-    Name = "Show Tracers",
-    CurrentValue = false,
-    Flag = "TracerToggle",
-    Callback = function(Value) Config.ESP.Tracers = Value end,
-})
-
-Rayfield:LoadConfiguration()
+Fluent:Notify({Title = "DZ HUB Loaded", Content = "Optimized for Xeno & Groundwork.", Duration = 5})
