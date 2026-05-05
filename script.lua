@@ -1,5 +1,5 @@
 --[[
-    FP2 ADAPTIVE AIMBOT & ESP FRAMEWORK
+    FPs ADAPTIVE AIMBOT & ESP FRAMEWORK
     Design: Rayfield UI
     Rendering: Drawing API (100% Functional)
 ]]--
