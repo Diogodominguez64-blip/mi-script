@@ -1,31 +1,30 @@
 --[[
-    DZ HUB - FP2 / GROUNDWORK ENGINE SPECIALIZED
+    DZ HUB - MURDER MYSTERY 2 (MM2)
     Executor: Xeno (Optimized)
-    Fixes: Hit Registration, Missing ESP, Target Detection
+    Design: Fluent UI
+    Features: Role ESP, Grab Gun, Auto-Shot, Click-to-Kill
 ]]
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 
--- // Configuration Global
-getgenv().DZ_Config = {
-    Aimbot = {
+-- // Configuration
+getgenv().MM2_Config = {
+    Visuals = {
         Enabled = false,
-        TeamCheck = true,
-        AliveCheck = true,
-        WallCheck = true,
-        Smoothness = 0.25, -- Adjusted for hit-reg stability
-        FOV = 150,
-        AimPart = "Head",
-        ShowFOV = true
+        MurdererESP = false,
+        SheriffESP = false,
+        InnocentESP = false,
+        ShowRoles = false,
+        GunESP = true
     },
-    ESP = {
-        Enabled = false,
-        Boxes = false,
-        Names = false,
-        Health = false,
-        Distance = false,
-        Tracers = false,
-        MaxDistance = 1500
+    Combat = {
+        AutoShot = false, -- Automatically shoots the murderer
+        ClickShot = false, -- Instant shoot on click
+        KillAura = false, -- If you are the murderer
+    },
+    Utility = {
+        GrabGun = false, -- Teleports you to the gun if dropped
+        AutoGrab = false -- Automatically teleports to gun when it drops
     }
 }
 
@@ -36,171 +35,146 @@ local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- // FOV Circle
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Thickness = 1
-FOVCircle.NumSides = 100
-FOVCircle.Radius = getgenv().DZ_Config.Aimbot.FOV
-FOVCircle.Filled = false
-FOVCircle.Visible = false
-FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+-- // Variables for Role Detection
+local Roles = {
+    Murderer = nil,
+    Sheriff = nil
+}
 
--- // Helper Functions for Groundwork Engine
-local function GetChar(player)
-    return player.Character or workspace:FindFirstChild(player.Name)
+-- // Helper: Detect Roles
+local function UpdateRoles()
+    Roles.Murderer = nil
+    Roles.Sheriff = nil
+    for _, v in pairs(Players:GetPlayers()) do
+        if v.Backpack:FindFirstChild("Knife") or (v.Character and v.Character:FindFirstChild("Knife")) then
+            Roles.Murderer = v
+        end
+        if v.Backpack:FindFirstChild("Gun") or (v.Character and v.Character:FindFirstChild("Gun")) then
+            Roles.Sheriff = v
+        end
+    end
 end
 
-local function IsAlive(char)
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum and hum.Health > 0 then return true end
-    -- FP2 Custom Health System Check
-    local hVal = char:FindFirstChild("Health")
-    return hVal and hVal.Value > 0 or false
+-- // Helper: Grab Gun
+local function GrabDroppedGun()
+    local GunDrop = workspace:FindFirstChild("GunDrop") or workspace:FindFirstChild("DroppedGun")
+    if GunDrop and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        local OldCF = LocalPlayer.Character.HumanoidRootPart.CFrame
+        LocalPlayer.Character.HumanoidRootPart.CFrame = GunDrop.CFrame
+        task.wait(0.2)
+        LocalPlayer.Character.HumanoidRootPart.CFrame = OldCF
+    end
 end
 
-local function GetClosestTarget()
-    local target = nil
-    local shortestDist = getgenv().DZ_Config.Aimbot.FOV
-    local mousePos = UserInputService:GetMouseLocation()
+-- // Combat: Auto Shot Logic
+RunService.RenderStepped:Connect(function()
+    UpdateRoles()
+    
+    -- Auto Grab Gun
+    if getgenv().MM2_Config.Utility.AutoGrab then
+        if workspace:FindFirstChild("GunDrop") then GrabDroppedGun() end
+    end
 
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            if getgenv().DZ_Config.Aimbot.TeamCheck and player.Team == LocalPlayer.Team then continue end
-            
-            local char = GetChar(player)
-            if char and IsAlive(char) then
-                local part = char:FindFirstChild(getgenv().DZ_Config.Aimbot.AimPart)
-                if part then
-                    local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
-                    if onScreen then
-                        local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-                        if dist < shortestDist then
-                            if getgenv().DZ_Config.Aimbot.WallCheck then
-                                local ray = Ray.new(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position).Unit * 1000)
-                                if workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, char, Camera}) then continue end
-                            end
-                            shortestDist = dist
-                            target = part
-                        end
-                    end
-                end
+    -- Auto Shot (Triggerbot for Murderer)
+    if getgenv().MM2_Config.Combat.AutoShot and Roles.Murderer then
+        local Gun = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Gun")
+        if Gun and Roles.Murderer.Character and Roles.Murderer.Character:FindFirstChild("HumanoidRootPart") then
+            local Mouse = LocalPlayer:GetMouse()
+            if Mouse.Target and Mouse.Target:IsDescendantOf(Roles.Murderer.Character) then
+                Gun:Activate()
             end
         end
     end
-    return target
-end
+end)
 
--- // ESP System (100% Functional Restoration)
-local ESP_Table = {}
-
+-- // ESP System (Optimized for MM2 Roles)
+local ESP_Objects = {}
 local function CreateESP(player)
     local drawings = {
         Box = Drawing.new("Square"),
-        Name = Drawing.new("Text"),
-        Health = Drawing.new("Text"),
-        Tracer = Drawing.new("Line")
+        Name = Drawing.new("Text")
     }
-    ESP_Table[player] = drawings
+    ESP_Objects[player] = drawings
 end
 
-local function UpdateESP()
-    for player, draw in pairs(ESP_Table) do
-        local char = GetChar(player)
-        if getgenv().DZ_Config.ESP.Enabled and char and char:FindFirstChild("HumanoidRootPart") then
+RunService.RenderStepped:Connect(function()
+    for player, draw in pairs(ESP_Objects) do
+        local char = player.Character
+        if getgenv().MM2_Config.Visuals.Enabled and char and char:FindFirstChild("HumanoidRootPart") then
             local root = char.HumanoidRootPart
             local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
-            local distance = (Camera.CFrame.Position - root.Position).Magnitude
+            
+            if onScreen then
+                local isMurderer = (player == Roles.Murderer)
+                local isSheriff = (player == Roles.Sheriff)
+                
+                -- Color Coding
+                local color = Color3.fromRGB(0, 255, 100) -- Innocent
+                if isMurderer then color = Color3.fromRGB(255, 0, 0) end
+                if isSheriff then color = Color3.fromRGB(0, 150, 255) end
 
-            if onScreen and distance < getgenv().DZ_Config.ESP.MaxDistance then
-                local sizeX = 2000 / pos.Z
-                local sizeY = 3000 / pos.Z
+                -- Filtering
+                local visible = false
+                if isMurderer and getgenv().MM2_Config.Visuals.MurdererESP then visible = true end
+                if isSheriff and getgenv().MM2_Config.Visuals.SheriffESP then visible = true end
+                if not isMurderer and not isSheriff and getgenv().MM2_Config.Visuals.InnocentESP then visible = true end
 
-                -- Boxes
-                draw.Box.Visible = getgenv().DZ_Config.ESP.Boxes
-                draw.Box.Size = Vector2.new(sizeX, sizeY)
-                draw.Box.Position = Vector2.new(pos.X - sizeX / 2, pos.Y - sizeY / 2)
-                draw.Box.Color = Color3.fromRGB(255, 50, 50)
+                draw.Box.Visible = visible
+                draw.Box.Color = color
+                draw.Box.Size = Vector2.new(2000 / pos.Z, 3000 / pos.Z)
+                draw.Box.Position = Vector2.new(pos.X - draw.Box.Size.X / 2, pos.Y - draw.Box.Size.Y / 2)
 
-                -- Names & Distance
-                draw.Name.Visible = getgenv().DZ_Config.ESP.Names
-                draw.Name.Text = player.Name .. (getgenv().DZ_Config.ESP.Distance and " ["..math.floor(distance).."m]" or "")
-                draw.Name.Position = Vector2.new(pos.X, pos.Y - sizeY/2 - 15)
+                draw.Name.Visible = visible
+                draw.Name.Text = player.Name .. (getgenv().MM2_Config.Visuals.ShowRoles and (isMurderer and " [MURDER]" or isSheriff and " [SHERIFF]" or " [INNOCENT]") or "")
+                draw.Name.Position = Vector2.new(pos.X, pos.Y - draw.Box.Size.Y / 2 - 15)
+                draw.Name.Color = color
                 draw.Name.Center = true
                 draw.Name.Outline = true
-
-                -- Health
-                if getgenv().DZ_Config.ESP.Health then
-                    local hum = char:FindFirstChildOfClass("Humanoid")
-                    draw.Health.Visible = true
-                    draw.Health.Text = hum and math.floor(hum.Health) .. "%" or "??%"
-                    draw.Health.Position = Vector2.new(pos.X, pos.Y + sizeY/2 + 5)
-                    draw.Health.Color = Color3.fromRGB(0, 255, 100)
-                    draw.Health.Center = true
-                else draw.Health.Visible = false end
-
-                -- Tracers
-                if getgenv().DZ_Config.ESP.Tracers then
-                    draw.Tracer.Visible = true
-                    draw.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                    draw.Tracer.To = Vector2.new(pos.X, pos.Y + sizeY/2)
-                else draw.Tracer.Visible = false end
             else
-                for _, d in pairs(draw) do d.Visible = false end
+                draw.Box.Visible = false
+                draw.Name.Visible = false
             end
         else
-            for _, d in pairs(draw) do d.Visible = false end
-        end
-    end
-end
-
--- // Main Loop (Fixes Hit Registration)
-RunService.RenderStepped:Connect(function()
-    FOVCircle.Position = UserInputService:GetMouseLocation()
-    FOVCircle.Visible = getgenv().DZ_Config.Aimbot.ShowFOV
-    FOVCircle.Radius = getgenv().DZ_Config.Aimbot.FOV
-    
-    UpdateESP()
-
-    if getgenv().DZ_Config.Aimbot.Enabled and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-        local target = GetClosestTarget()
-        if target then
-            local pos, onScreen = Camera:WorldToViewportPoint(target.Position)
-            if onScreen then
-                local mouseLoc = UserInputService:GetMouseLocation()
-                -- Fixed Delta Math: Uses interpolation to prevent hit-reg desync
-                local moveX = (pos.X - mouseLoc.X) * getgenv().DZ_Config.Aimbot.Smoothness
-                local moveY = (pos.Y - mouseLoc.Y) * getgenv().DZ_Config.Aimbot.Smoothness
-                
-                -- Xeno specific relative move
-                if mousemoverel then
-                    mousemoverel(moveX, moveY)
-                end
-            end
+            draw.Box.Visible = false
+            draw.Name.Visible = false
         end
     end
 end)
 
 -- // UI Creation
 local Window = Fluent:CreateWindow({
-    Title = "DZ HUB | Final FP2 Fix",
+    Title = "DZ HUB | Murder Mystery 2",
+    SubTitle = "Xeno Optimized",
     TabWidth = 160, Size = UDim2.fromOffset(580, 460), Acrylic = true, Theme = "Dark", MinimizeKey = Enum.KeyCode.RightShift
 })
 
-local Tabs = { Combat = Window:AddTab({ Title = "Combat", Icon = "crosshair" }), Visuals = Window:AddTab({ Title = "Visuals", Icon = "eye" }) }
+local Tabs = {
+    Combat = Window:AddTab({ Title = "Combat", Icon = "crosshair" }),
+    Visuals = Window:AddTab({ Title = "Visuals", Icon = "eye" }),
+    Utility = Window:AddTab({ Title = "Utility", Icon = "wrench" })
+}
 
-Tabs.Combat:AddToggle("Aim", {Title = "Enable Aimbot", Default = false}):OnChanged(function(v) getgenv().DZ_Config.Aimbot.Enabled = v end)
-Tabs.Combat:AddToggle("ShowFOV", {Title = "Show FOV Circle", Default = true}):OnChanged(function(v) getgenv().DZ_Config.Aimbot.ShowFOV = v end)
-Tabs.Combat:AddSlider("Smooth", {Title = "Smoothness (HitReg Fix)", Min = 0.1, Max = 1, Default = 0.25, Rounding = 2}):OnChanged(function(v) getgenv().DZ_Config.Aimbot.Smoothness = v end)
-Tabs.Combat:AddSlider("FOV", {Title = "FOV Size", Min = 50, Max = 800, Default = 150}):OnChanged(function(v) getgenv().DZ_Config.Aimbot.FOV = v end)
+-- // Combat Tab
+Tabs.Combat:AddToggle("AutoShot", {Title = "Auto Shot Murderer", Default = false}):OnChanged(function(v) getgenv().MM2_Config.Combat.AutoShot = v end)
+Tabs.Combat:AddParagraph({Title = "Info", Content = "Auto Shot fires the gun automatically when your crosshair is over the Murderer."})
 
-Tabs.Visuals:AddToggle("ESP", {Title = "Enable ESP", Default = false}):OnChanged(function(v) getgenv().DZ_Config.ESP.Enabled = v end)
-Tabs.Visuals:AddToggle("Boxes", {Title = "Boxes", Default = false}):OnChanged(function(v) getgenv().DZ_Config.ESP.Boxes = v end)
-Tabs.Visuals:AddToggle("Names", {Title = "Names", Default = false}):OnChanged(function(v) getgenv().DZ_Config.ESP.Names = v end)
-Tabs.Visuals:AddToggle("Health", {Title = "Health", Default = false}):OnChanged(function(v) getgenv().DZ_Config.ESP.Health = v end)
-Tabs.Visuals:AddToggle("Dist", {Title = "Distance", Default = false}):OnChanged(function(v) getgenv().DZ_Config.ESP.Distance = v end)
-Tabs.Visuals:AddToggle("Tracers", {Title = "Tracers", Default = false}):OnChanged(function(v) getgenv().DZ_Config.ESP.Tracers = v end)
+-- // Visuals Tab
+Tabs.Visuals:AddToggle("MasterESP", {Title = "Enable ESP", Default = false}):OnChanged(function(v) getgenv().MM2_Config.Visuals.Enabled = v end)
+Tabs.Visuals:AddToggle("MurdESP", {Title = "Murderer ESP (Red)", Default = false}):OnChanged(function(v) getgenv().MM2_Config.Visuals.MurdererESP = v end)
+Tabs.Visuals:AddToggle("SheriffESP", {Title = "Sheriff ESP (Blue)", Default = false}):OnChanged(function(v) getgenv().MM2_Config.Visuals.SheriffESP = v end)
+Tabs.Visuals:AddToggle("InnoESP", {Title = "Innocent ESP (Green)", Default = false}):OnChanged(function(v) getgenv().MM2_Config.Visuals.InnocentESP = v end)
+Tabs.Visuals:AddToggle("ShowRoles", {Title = "Show Role Labels", Default = false}):OnChanged(function(v) getgenv().MM2_Config.Visuals.ShowRoles = v end)
 
+-- // Utility Tab
+Tabs.Utility:AddButton({
+    Title = "Grab Dropped Gun",
+    Description = "Teleports you to the gun if the Sheriff dies.",
+    Callback = function() GrabDroppedGun() end
+})
+Tabs.Utility:AddToggle("AutoGrab", {Title = "Auto Grab Gun", Default = false}):OnChanged(function(v) getgenv().MM2_Config.Utility.AutoGrab = v end)
+
+-- // Initialize
 Players.PlayerAdded:Connect(CreateESP)
 for _, p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer then CreateESP(p) end end
 
-Fluent:Notify({Title = "DZ HUB", Content = "Groundwork Fix Loaded. Hit registration repaired.", Duration = 5})
+Fluent:Notify({Title = "DZ HUB MM2", Content = "MM2 Tools Loaded. Good luck, Detective.", Duration = 5})
