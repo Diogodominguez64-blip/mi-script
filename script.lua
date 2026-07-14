@@ -1,6 +1,3 @@
-Aquí tienes el código completado respetando de forma exacta toda la estructura, variables e interfaz gráfica que ya tenías definida, cerrando las instancias incompletas y conectando los estados lógicos de los botones y funciones del menú:
-
-```lua
 -- DZ STORE Script para Roblox Fluxo PvP
 -- Creado para proporcionar ventajas competitivas en el juego
 
@@ -24,7 +21,7 @@ local AimSmoothness = 0.2
 -- Creación de la interfaz de usuario
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "DZ_STORE_GUI"
-ScreenGui.Parent = game.CoreGui
+ScreenGui.Parent = game:GetService("CoreGui") -- Mejor usar CoreGui en exploits
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 -- Función para crear el menú principal
@@ -37,7 +34,7 @@ local function createMenu()
     MainFrame.BorderSizePixel = 0
     MainFrame.Position = UDim2.new(0.5, -200, 0.5, -150)
     MainFrame.Size = UDim2.new(0, 400, 0, 300)
-    MainFrame.Visible = true -- Cambiado a true para que sea visible al ejecutar
+    MainFrame.Visible = true
     
     -- Efecto de redondeo
     local UICorner = Instance.new("UICorner")
@@ -148,7 +145,7 @@ local function createMenu()
     RadiusSlider.Parent = MainFrame
     RadiusSlider.BackgroundColor3 = Color3.fromRGB(255, 0, 100)
     RadiusSlider.BorderSizePixel = 0
-    RadiusSlider.Position = UDim2.new(0.05, 0, 0.65, 0) -- Ajustado para espaciado correcto
+    RadiusSlider.Position = UDim2.new(0.05, 0, 0.65, 0)
     RadiusSlider.Size = UDim2.new(0.9, 0, 0, 10)
     RadiusSlider.AutoButtonColor = false
     RadiusSlider.Font = Enum.Font.SourceSans
@@ -173,7 +170,7 @@ local function createMenu()
     
     local UICorner9 = Instance.new("UICorner")
     UICorner9.CornerRadius = UDim.new(0, 10)
-    UICorner9.Parent = SliderButton -- Se completó el elemento del corte original
+    UICorner9.Parent = SliderButton
 
     -- Círculo visual del campo de visión (FOV)
     local FOVCircle = Drawing.new("Circle")
@@ -182,6 +179,7 @@ local function createMenu()
     FOVCircle.Transparency = 0.8
     FOVCircle.Filled = false
     FOVCircle.Visible = false
+    FOVCircle.Radius = AimRadius
 
     -- Lógica de arrastre para el menú principal (Drag)
     local dragging, dragInput, dragStart, startPos
@@ -249,7 +247,7 @@ local function createMenu()
         local relativeX = mousePos.X - RadiusSlider.AbsolutePosition.X
         local percentage = math.clamp(relativeX / RadiusSlider.AbsoluteSize.X, 0, 1)
         SliderButton.Position = UDim2.new(percentage, -10, 0.5, -10)
-        AimRadius = math.floor(percentage * 300) -- Rango máximo de 300 píxeles
+        AimRadius = math.floor(percentage * 300)
         RadiusLabel.Text = "Aim Radius: " .. tostring(AimRadius)
         FOVCircle.Radius = AimRadius
     end
@@ -300,7 +298,7 @@ local function createMenu()
         return target
     end
 
-    -- Bucle principal del sistema para dibujar el FOV y procesar el auto-apuntado
+    -- Bucle principal del sistema
     RunService.RenderStepped:Connect(function()
         local mouseLocation = UserInputService:GetMouseLocation()
         FOVCircle.Position = mouseLocation
@@ -308,20 +306,13 @@ local function createMenu()
         if AimbotEnabled and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
             local targetPart = getClosestPlayer()
             if targetPart then
-                local screenPoint, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                if onScreen then
-                    local targetInput = Vector2.new(screenPoint.X, screenPoint.Y)
-                    local currentMouse = UserInputService:GetMouseLocation()
-                    -- Interpolación suave basada en el parámetro AimSmoothness
-                    local lookAt = currentMouse:Lerp(targetInput, AimSmoothness)
-                    -- Nota: En entornos de producción reales, las modificaciones de la cámara se calculan a través del CFrame
-                end
+                -- Lógica corregida para mover la cámara
+                local targetCFrame = CFrame.new(Camera.CFrame.Position, targetPart.Position)
+                Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, AimSmoothness)
             end
         end
     end)
 end
 
--- Inicialización automática de los componentes gráficos del menú principal
+-- Inicialización
 createMenu()
-
-```
