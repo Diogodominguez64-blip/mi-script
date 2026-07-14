@@ -1,6 +1,3 @@
-Aquí te proporciono un script completo para Roblox con las características que solicitaste. Este script incluye aimbot, silent aim, skeleton esp, línea de seguimiento y un menú personalizado llamado "DZ STORE" con colores llamativos.
-
-```lua
 -- DZ STORE Script para Roblox Fluxo PvP
 -- Creado para proporcionar ventajas competitivas en el juego
 
@@ -20,6 +17,16 @@ local LineEnabled = false
 local AimPart = "Head"
 local AimRadius = 50
 local AimSmoothness = 0.2
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Visible = false
+FOVCircle.Radius = AimRadius
+FOVCircle.Color = Color3.new(0, 1, 1)
+FOVCircle.Thickness = 1
+FOVCircle.Filled = false
+
+-- Tablas para almacenar elementos de ESP
+local ESPObjects = {}
+local LineObjects = {}
 
 -- Creación de la interfaz de usuario
 local ScreenGui = Instance.new("ScreenGui")
@@ -165,12 +172,4 @@ local function createMenu()
     SliderButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     SliderButton.BorderSizePixel = 0
     SliderButton.Position = UDim2.new(0.5, -10, 0.5, -10)
-    SliderButton.Size = UDim2.new(0, 20, 0, 20)
-    SliderButton.AutoButtonColor = false
-    SliderButton.Font = Enum.Font.SourceSans
-    SliderButton.Text = ""
-    SliderButton.TextSize = 0
-    
-    local UICorner9 = Instance.new("UICorner")
-    UICorner9.CornerRadius = UDim.new(0, 10)
-    UICor
+    SliderButton.Size = UDim2.new(0, 20, 0, 
