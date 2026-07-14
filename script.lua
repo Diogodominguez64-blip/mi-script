@@ -1,6 +1,6 @@
 -- ==========================================
--- DZ STORE V1 - Enhanced Aimbot & ESP
--- Version: 3.0 (Mobile Supported & Modern UI)
+-- DZ STORE V1 - Enhanced Blatant Aimbot & ESP
+-- Optimized for Performance & High FPS
 -- ==========================================
 
 -- Services
@@ -21,6 +21,7 @@ local Aimbot = {
     fovColor = Color3.fromRGB(255, 50, 75),
     fovTransparency = 0.5,
     bone = "Head",
+    maxDistance = 10000,
     prediction = true,
     predictionAmount = 0.25,
     autoFire = false,
@@ -29,16 +30,25 @@ local Aimbot = {
 }
 
 local ESP = {
-    skeletonEnabled = false,
-    lineEnabled = false,
-    skeletonThickness = 1.5,
-    skeletonColor = Color3.fromRGB(255, 255, 255),
-    lineThickness = 1.5,
-    lineColor = Color3.fromRGB(255, 50, 75),
-    maxDistance = 2000
+    enabled = true,
+    skeleton = true,
+    box = true,
+    health = true,
+    line = true,
+    teamCheck = false,
+    distanceCheck = 10000,
+    boxColor = Color3.fromRGB(255, 50, 75),
+    boxTransparency = 0.6,
+    lineColor = Color3.fromRGB(255, 255, 255),
+    lineTransparency = 0.5,
+    healthBarColor = Color3.fromRGB(0, 255, 100),
+    healthBarTransparency = 0.7,
+    healthBarHeight = 5,
+    healthBarWidth = 50,
+    performanceMode = true
 }
 
--- FOV Circle
+-- FOV Circle Graphic
 local fovCircle = Drawing.new("Circle")
 fovCircle.Color = Aimbot.fovColor
 fovCircle.Thickness = 1.5
@@ -48,8 +58,14 @@ fovCircle.Filled = false
 fovCircle.Transparency = Aimbot.fovTransparency
 fovCircle.Visible = Aimbot.showFov
 
+-- Caching tables for performance optimization
+local activePlayers = {}
+local lastTargetTime = 0
+local targetUpdateInterval = 0.016
+local currentTarget = nil
+
 -- ==========================================
--- CORE LOGIC (AIMBOT & ESP)
+-- CORE UTILITIES & VALIDATION
 -- ==========================================
 
 local function IsValidTarget(player)
@@ -60,12 +76,23 @@ local function IsValidTarget(player)
         return false 
     end
     
-    if Aimbot.teamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then 
-        return false 
-    end
-    
     return true
 end
+
+local function IsESPValidTarget(player)
+    if player == LocalPlayer then return false end
+    if ESP.teamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then return false end
+    
+    local character = player.Character
+    if not character or not character:FindFirstChild("Humanoid") or character.Humanoid.Health <= 0 then
+        return false
+    end
+    return true
+end
+
+-- ==========================================
+-- BLATANT AIMBOT CORE LOGIC
+-- ==========================================
 
 local function GetClosestPlayerToCursor()
     local closestPlayer = nil
@@ -73,6 +100,7 @@ local function GetClosestPlayerToCursor()
     
     for _, player in ipairs(Players:GetPlayers()) do
         if not IsValidTarget(player) then continue end
+        if Aimbot.teamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then continue end
         
         local character = player.Character
         local targetBone = character:FindFirstChild(Aimbot.bone) or character:FindFirstChild("HumanoidRootPart")
@@ -90,7 +118,6 @@ local function GetClosestPlayerToCursor()
             closestPlayer = player
         end
     end
-    
     return closestPlayer
 end
 
@@ -136,52 +163,168 @@ local function AimAt(target)
     end
 end
 
--- ESP Drawings Manager
-local ESP_Drawings = {}
+-- ==========================================
+-- ADVANCED ADVANCED ESP CORE LOGIC
+-- ==========================================
 
-local function createDrawings(player)
-    local drawings = { Line = Drawing.new("Line"), Skeleton = {} }
-    local bones = {
-        {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
-        {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
-        {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
-        {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"},
-        {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"}
-    }
-    
-    for i = 1, #bones do
-        local line = Drawing.new("Line")
-        line.Thickness = ESP.skeletonThickness
-        line.Color = ESP.skeletonColor
-        line.Transparency = 1
-        drawings.Skeleton[i] = {line = line, parts = bones[i]}
+local function ClearPlayerESP(player)
+    if activePlayers[player] then
+        local data = activePlayers[player]
+        if data.box then data.box:Remove() end
+        if data.line then data.line:Remove() end
+        if data.healthBar then data.healthBar:Remove() end
+        if data.skeleton then
+            for _, boneLine in pairs(data.skeleton) do
+                boneLine:Remove()
+            end
+        end
+        activePlayers[player] = nil
     end
-    
-    drawings.Line.Thickness = ESP.lineThickness
-    drawings.Line.Color = ESP.lineColor
-    ESP_Drawings[player] = drawings
 end
 
-Players.PlayerRemoving:Connect(function(player)
-    if ESP_Drawings[player] then
-        ESP_Drawings[player].Line:Remove()
-        for _, obj in pairs(ESP_Drawings[player].Skeleton) do obj.line:Remove() end
-        ESP_Drawings[player] = nil
-    end
-end)
+local function UpdatePlayerESP(player)
+    local character = player.Character
+    if not character then return end
 
--- Main Loop
-local lastTargetTime = 0
-local targetUpdateInterval = 0.016
-local currentTarget = nil
+    local humanoid = character:FindFirstChild("Humanoid")
+    local head = character:FindFirstChild("Head")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not head or not rootPart then return end
+
+    local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local distance = localRoot and (rootPart.Position - localRoot.Position).Magnitude or (Camera.CFrame.Position - rootPart.Position).Magnitude
+    
+    if distance > ESP.distanceCheck then 
+        ClearPlayerESP(player)
+        return 
+    end
+
+    if not activePlayers[player] then
+        activePlayers[player] = { skeleton = {} }
+    end
+    local data = activePlayers[player]
+
+    -- Render Box Layout
+    if ESP.box and ESP.enabled then
+        if not data.box then
+            data.box = Drawing.new("Square")
+            data.box.Thickness = 1.5
+            data.box.Filled = false
+        end
+        data.box.Color = ESP.boxColor
+        data.box.Transparency = ESP.boxTransparency
+        
+        local screenPoint, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+        if onScreen then
+            local scale = 1.5
+            data.box.Size = Vector2.new(100 * scale, 200 * scale)
+            data.box.Position = Vector2.new(screenPoint.X - data.box.Size.X / 2, screenPoint.Y - data.box.Size.Y / 2)
+            data.box.Visible = true
+        else
+            data.box.Visible = false
+        end
+    elseif data.box then
+        data.box.Visible = false
+    end
+
+    -- Render Head-to-Root Lines
+    if ESP.line and ESP.enabled then
+        if not data.line then
+            data.line = Drawing.new("Line")
+            data.line.Thickness = 1.5
+        end
+        data.line.Color = ESP.lineColor
+        data.line.Transparency = ESP.lineTransparency
+        
+        local rootScreenPoint, rootOnScreen = Camera:WorldToViewportPoint(rootPart.Position)
+        local headScreenPoint, headOnScreen = Camera:WorldToViewportPoint(head.Position)
+        if rootOnScreen and headOnScreen then
+            data.line.From = Vector2.new(rootScreenPoint.X, rootScreenPoint.Y)
+            data.line.To = Vector2.new(headScreenPoint.X, headScreenPoint.Y)
+            data.line.Visible = true
+        else
+            data.line.Visible = false
+        end
+    elseif data.line then
+        data.line.Visible = false
+    end
+
+    -- Render Health Metrics
+    if ESP.health and ESP.enabled then
+        if not data.healthBar then
+            data.healthBar = Drawing.new("Square")
+            data.healthBar.Thickness = 1
+            data.healthBar.Filled = true
+        end
+        data.healthBar.Color = ESP.healthBarColor
+        data.healthBar.Transparency = ESP.healthBarTransparency
+        
+        local screenPoint, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+        if onScreen then
+            data.healthBar.Position = Vector2.new(screenPoint.X - ESP.healthBarWidth / 2, screenPoint.Y - 22)
+            data.healthBar.Size = Vector2.new(ESP.healthBarWidth * (math.clamp(humanoid.Health, 0, humanoid.MaxHealth) / humanoid.MaxHealth), ESP.healthBarHeight)
+            data.healthBar.Visible = true
+        else
+            data.healthBar.Visible = false
+        end
+    elseif data.healthBar then
+        data.healthBar.Visible = false
+    end
+
+    -- Render Full Real-Time Skeleton
+    if ESP.skeleton and ESP.enabled then
+        local bones = {
+            {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+            {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"},
+            {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"},
+            {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"},
+            {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}
+        }
+        
+        for i, boneRelation in ipairs(bones) do
+            local p1 = character:FindFirstChild(boneRelation[1]) or character:FindFirstChild("Torso")
+            local p2 = character:FindFirstChild(boneRelation[2]) or character:FindFirstChild("Torso")
+            
+            if p1 and p2 then
+                if not data.skeleton[i] then
+                    data.skeleton[i] = Drawing.new("Line")
+                    data.skeleton[i].Thickness = 1.5
+                end
+                data.skeleton[i].Color = ESP.lineColor
+                data.skeleton[i].Transparency = ESP.lineTransparency
+                
+                local pos1, vis1 = Camera:WorldToViewportPoint(p1.Position)
+                local pos2, vis2 = Camera:WorldToViewportPoint(p2.Position)
+                
+                if vis1 or vis2 then
+                    data.skeleton[i].From = Vector2.new(pos1.X, pos1.Y)
+                    data.skeleton[i].To = Vector2.new(pos2.X, pos2.Y)
+                    data.skeleton[i].Visible = true
+                else
+                    data.skeleton[i].Visible = false
+                end
+            elseif data.skeleton[i] then
+                data.skeleton[i].Visible = false
+            end
+        end
+    elseif data.skeleton then
+        for _, boneLine in pairs(data.skeleton) do boneLine.Visible = false end
+    end
+end
+
+Players.PlayerRemoving:Connect(ClearPlayerESP)
+
+-- ==========================================
+-- MAIN ENGINE TICK
+-- ==========================================
 
 RunService.RenderStepped:Connect(function()
-    -- 1. FOV Update
+    -- Sync FOV Display Object
     fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     fovCircle.Radius = Aimbot.fov
     fovCircle.Visible = Aimbot.enabled and Aimbot.showFov
 
-    -- 2. Aimbot Loop
+    -- Run Aimbot Logic Subsystem
     if Aimbot.enabled then
         local currentTime = tick()
         if not Aimbot.performanceMode or (currentTime - lastTargetTime) > targetUpdateInterval then
@@ -207,118 +350,72 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- 3. ESP Loop
-    for _, player in pairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        
-        if not ESP_Drawings[player] then createDrawings(player) end
-        
-        local drawings = ESP_Drawings[player]
-        local isEnemy = IsValidTarget(player) 
-        local character = player.Character
-        local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-        
-        local shouldDraw = isEnemy and (ESP.skeletonEnabled or ESP.lineEnabled)
-        
-        if shouldDraw and rootPart then
-            local rootPos, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
-            local distance = (Camera.CFrame.Position - rootPart.Position).Magnitude
-            
-            if onScreen and distance < ESP.maxDistance then
-                -- Tracers
-                if ESP.lineEnabled then
-                    drawings.Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                    drawings.Line.To = Vector2.new(rootPos.X, rootPos.Y)
-                    drawings.Line.Visible = true
-                else
-                    drawings.Line.Visible = false
-                end
-                
-                -- Skeleton
-                if ESP.skeletonEnabled then
-                    for _, boneData in pairs(drawings.Skeleton) do
-                        local part1 = character:FindFirstChild(boneData.parts[1]) or character:FindFirstChild("Torso")
-                        local part2 = character:FindFirstChild(boneData.parts[2]) or character:FindFirstChild("Torso")
-                        
-                        if part1 and part2 then
-                            local pos1, vis1 = Camera:WorldToViewportPoint(part1.Position)
-                            local pos2, vis2 = Camera:WorldToViewportPoint(part2.Position)
-                            
-                            if vis1 or vis2 then
-                                boneData.line.From = Vector2.new(pos1.X, pos1.Y)
-                                boneData.line.To = Vector2.new(pos2.X, pos2.Y)
-                                boneData.line.Visible = true
-                            else
-                                boneData.line.Visible = false
-                            end
-                        else
-                            boneData.line.Visible = false
-                        end
-                    end
-                else
-                    for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
-                end
-            else
-                drawings.Line.Visible = false
-                for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
+    -- Run ESP Logic Subsystem
+    local espTime = tick()
+    if not ESP.performanceMode or (espTime - lastTargetTime) > targetUpdateInterval then
+        for player, _ in pairs(activePlayers) do
+            if not IsESPValidTarget(player) then
+                ClearPlayerESP(player)
             end
-        else
-            drawings.Line.Visible = false
-            for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
+        end
+
+        for _, player in ipairs(Players:GetPlayers()) do
+            if IsESPValidTarget(player) then
+                UpdatePlayerESP(player)
+            end
         end
     end
 end)
 
 -- ==========================================
--- MOD MENU GUI (DZ STORE V1)
+-- MOD MENU GUI CREATION (DZ STORE V1 STYLE)
 -- ==========================================
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DZ_STORE_V1"
+ScreenGui.Name = "DZ_STORE_V1_PANEL"
 ScreenGui.Parent = game:GetService("CoreGui")
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- Color Palette
 local Colors = {
-    Background = Color3.fromRGB(20, 20, 25),
+    Background = Color3.fromRGB(18, 18, 22),
     Accent = Color3.fromRGB(255, 50, 75),
-    DarkElement = Color3.fromRGB(30, 30, 35),
-    Text = Color3.fromRGB(240, 240, 240),
+    DarkElement = Color3.fromRGB(28, 28, 34),
+    Text = Color3.fromRGB(245, 245, 245),
     Active = Color3.fromRGB(255, 50, 75),
-    Inactive = Color3.fromRGB(50, 50, 60)
+    Inactive = Color3.fromRGB(45, 45, 55)
 }
 
--- Mobile Open Button (Floating)
-local OpenButton = Instance.new("TextButton")
-OpenButton.Parent = ScreenGui
-OpenButton.Size = UDim2.new(0, 45, 0, 45)
-OpenButton.Position = UDim2.new(1, -60, 0, 20)
-OpenButton.BackgroundColor3 = Colors.Accent
-OpenButton.Text = "DZ"
-OpenButton.Font = Enum.Font.GothamBold
-OpenButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-OpenButton.TextSize = 18
-OpenButton.BorderSizePixel = 0
-Instance.new("UICorner", OpenButton).CornerRadius = UDim.new(1, 0)
-OpenButton.Active = true
-OpenButton.Draggable = true -- Allows mobile users to move the floating button
+-- Mobile Floating Toggle Button (Open & Close Menu)
+local MobileFloatingButton = Instance.new("TextButton")
+MobileFloatingButton.Parent = ScreenGui
+MobileFloatingButton.Size = UDim2.new(0, 50, 0, 50)
+MobileFloatingButton.Position = UDim2.new(1, -65, 0, 25)
+MobileFloatingButton.BackgroundColor3 = Colors.Accent
+MobileFloatingButton.Text = "DZ"
+MobileFloatingButton.Font = Enum.Font.GothamBlack
+MobileFloatingButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MobileFloatingButton.TextSize = 16
+MobileFloatingButton.BorderSizePixel = 0
+Instance.new("UICorner", MobileFloatingButton).CornerRadius = UDim.new(1, 0)
+MobileFloatingButton.Active = true
+MobileFloatingButton.Draggable = true -- Allows mobile players to drag it anywhere
 
--- Main Frame
+-- Main Panel Frame
 local MainFrame = Instance.new("Frame")
 MainFrame.Parent = ScreenGui
-MainFrame.Size = UDim2.new(0, 320, 0, 450)
-MainFrame.Position = UDim2.new(0.5, -160, 0.5, -225)
+MainFrame.Size = UDim2.new(0, 320, 0, 460)
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -230)
 MainFrame.BackgroundColor3 = Colors.Background
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
-MainFrame.Visible = false -- Starts hidden
+MainFrame.Visible = false
 
--- Title Bar
+-- Title Bar Top Layout
 local TitleBar = Instance.new("Frame")
 TitleBar.Parent = MainFrame
-TitleBar.Size = UDim2.new(1, 0, 0, 40)
+TitleBar.Size = UDim2.new(1, 0, 0, 45)
 TitleBar.BackgroundColor3 = Colors.Accent
 TitleBar.BorderSizePixel = 0
 local TitleCorner = Instance.new("UICorner")
@@ -333,7 +430,7 @@ TitleBottomCover.BorderSizePixel = 0
 
 local Title = Instance.new("TextLabel")
 Title.Parent = TitleBar
-Title.Size = UDim2.new(1, -40, 1, 0)
+Title.Size = UDim2.new(1, -50, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
 Title.Text = "DZ STORE V1"
@@ -342,44 +439,42 @@ Title.TextSize = 18
 Title.Font = Enum.Font.GothamBlack
 Title.TextXAlignment = Enum.TextXAlignment.Left
 
--- Close Button (Inside Menu)
+-- Desktop GUI Inline Close Button
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Parent = TitleBar
 CloseBtn.Size = UDim2.new(0, 30, 0, 30)
-CloseBtn.Position = UDim2.new(1, -35, 0.5, -15)
+CloseBtn.Position = UDim2.new(1, -38, 0.5, -15)
 CloseBtn.BackgroundTransparency = 1
-CloseBtn.Text = "X"
+CloseBtn.Text = "✕"
 CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.TextSize = 16
 
--- Toggle Menu Logic
-OpenButton.MouseButton1Click:Connect(function()
-    MainFrame.Visible = true
-    OpenButton.Visible = false
-end)
-CloseBtn.MouseButton1Click:Connect(function()
-    MainFrame.Visible = false
-    OpenButton.Visible = true
-end)
+-- Toggle Visual State Configurations
+local function ToggleMenuState()
+    MainFrame.Visible = not MainFrame.Visible
+end
+
+MobileFloatingButton.MouseButton1Click:Connect(ToggleMenuState)
+CloseBtn.MouseButton1Click:Connect(ToggleMenuState)
+
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.KeyCode == Enum.KeyCode.Insert then
-        MainFrame.Visible = not MainFrame.Visible
-        OpenButton.Visible = not MainFrame.Visible
+        ToggleMenuState()
     end
 end)
 
--- Scrolling Content
+-- Main Dynamic Scroll Area
 local ContentFrame = Instance.new("ScrollingFrame")
 ContentFrame.Parent = MainFrame
-ContentFrame.Size = UDim2.new(1, -16, 1, -50)
-ContentFrame.Position = UDim2.new(0, 8, 0, 45)
+ContentFrame.Size = UDim2.new(1, -16, 1, -60)
+ContentFrame.Position = UDim2.new(0, 8, 0, 52)
 ContentFrame.BackgroundColor3 = Colors.Background
 ContentFrame.BorderSizePixel = 0
 ContentFrame.ScrollBarThickness = 4
 ContentFrame.ScrollBarImageColor3 = Colors.Accent
-ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 420)
+ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 550)
 
 local UIListLayout = Instance.new("UIListLayout")
 UIListLayout.Parent = ContentFrame
@@ -389,12 +484,12 @@ UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
 local layoutOrder = 0
 
--- Custom Toggle Component
+-- UI Component: Functional Option Toggle
 local function CreateToggle(name, tableRef, configKey)
     layoutOrder = layoutOrder + 1
     local container = Instance.new("Frame")
     container.Parent = ContentFrame
-    container.Size = UDim2.new(1, 0, 0, 35)
+    container.Size = UDim2.new(1, 0, 0, 38)
     container.BackgroundColor3 = Colors.DarkElement
     container.LayoutOrder = layoutOrder
     Instance.new("UICorner", container).CornerRadius = UDim.new(0, 6)
@@ -402,7 +497,7 @@ local function CreateToggle(name, tableRef, configKey)
     local label = Instance.new("TextLabel")
     label.Parent = container
     label.Size = UDim2.new(0.7, 0, 1, 0)
-    label.Position = UDim2.new(0, 10, 0, 0)
+    label.Position = UDim2.new(0, 12, 0, 0)
     label.BackgroundTransparency = 1
     label.Text = name
     label.TextColor3 = Colors.Text
@@ -412,13 +507,13 @@ local function CreateToggle(name, tableRef, configKey)
 
     local btn = Instance.new("TextButton")
     btn.Parent = container
-    btn.Size = UDim2.new(0, 50, 0, 22)
-    btn.Position = UDim2.new(1, -60, 0.5, -11)
+    btn.Size = UDim2.new(0, 52, 0, 24)
+    btn.Position = UDim2.new(1, -64, 0.5, -12)
     btn.BackgroundColor3 = tableRef[configKey] and Colors.Active or Colors.Inactive
     btn.Text = tableRef[configKey] and "ON" or "OFF"
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
     btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 12
+    btn.TextSize = 11
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
 
     btn.MouseButton1Click:Connect(function()
@@ -428,20 +523,20 @@ local function CreateToggle(name, tableRef, configKey)
     end)
 end
 
--- Custom Slider Component
+-- UI Component: Scale/Value Sliders
 local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
     layoutOrder = layoutOrder + 1
     local container = Instance.new("Frame")
     container.Parent = ContentFrame
-    container.Size = UDim2.new(1, 0, 0, 50)
+    container.Size = UDim2.new(1, 0, 0, 52)
     container.BackgroundColor3 = Colors.DarkElement
     container.LayoutOrder = layoutOrder
     Instance.new("UICorner", container).CornerRadius = UDim.new(0, 6)
 
     local label = Instance.new("TextLabel")
     label.Parent = container
-    label.Size = UDim2.new(1, -20, 0, 20)
-    label.Position = UDim2.new(0, 10, 0, 5)
+    label.Size = UDim2.new(1, -20, 0, 22)
+    label.Position = UDim2.new(0, 12, 0, 4)
     label.BackgroundTransparency = 1
     label.Text = string.format("%s: %s", name, tostring(tableRef[configKey]))
     label.TextColor3 = Colors.Text
@@ -451,8 +546,8 @@ local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
 
     local sliderBg = Instance.new("Frame")
     sliderBg.Parent = container
-    sliderBg.Size = UDim2.new(1, -20, 0, 6)
-    sliderBg.Position = UDim2.new(0, 10, 0, 30)
+    sliderBg.Size = UDim2.new(1, -24, 0, 6)
+    sliderBg.Position = UDim2.new(0, 12, 0, 32)
     sliderBg.BackgroundColor3 = Colors.Inactive
     Instance.new("UICorner", sliderBg).CornerRadius = UDim.new(1, 0)
 
@@ -470,15 +565,14 @@ local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
     btn.Text = ""
 
     local isSliding = false
+    local function StartSlide() isSliding = true end
+    local function EndSlide() isSliding = false end
+
     btn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then 
-            isSliding = true 
-        end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then StartSlide() end
     end)
     UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then 
-            isSliding = false 
-        end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then EndSlide() end
     end)
 
     UserInputService.InputChanged:Connect(function(input)
@@ -492,9 +586,6 @@ local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
             
             tableRef[configKey] = value
             label.Text = string.format("%s: %s", name, tostring(value))
-            
-            -- If FOV, visually update color immediately
-            if configKey == "fov" then fovCircle.Radius = value end
         end
     end)
 end
@@ -503,7 +594,7 @@ local function CreateSection(text)
     layoutOrder = layoutOrder + 1
     local label = Instance.new("TextLabel")
     label.Parent = ContentFrame
-    label.Size = UDim2.new(1, 0, 0, 20)
+    label.Size = UDim2.new(1, 0, 0, 24)
     label.BackgroundTransparency = 1
     label.Text = text
     label.TextColor3 = Colors.Accent
@@ -513,19 +604,22 @@ local function CreateSection(text)
 end
 
 -- ==========================================
--- POPULATE MENU
+-- MENU ASSIGNMENT POPULATION
 -- ==========================================
-CreateSection("AIMBOT")
+CreateSection("AIMBOT OPTIONS")
 CreateToggle("Enable Aimbot", Aimbot, "enabled")
 CreateToggle("Instant Lock", Aimbot, "instantLock")
 CreateToggle("Auto Fire", Aimbot, "autoFire")
-CreateToggle("Team Check", Aimbot, "teamCheck")
+CreateToggle("Team Check (Aim)", Aimbot, "teamCheck")
 CreateToggle("Show FOV Circle", Aimbot, "showFov")
-
-CreateSection("AIMBOT SETTINGS")
 CreateSlider("FOV Radius", Aimbot, "fov", 10, 800, false)
 CreateSlider("Smoothness", Aimbot, "smoothness", 0, 0.99, true)
 
-CreateSection("ESP")
-CreateToggle("Skeleton ESP", ESP, "skeletonEnabled")
-CreateToggle("Line Tracers ESP", ESP, "lineEnabled")
+CreateSection("ESP VISUAL OPTIONS")
+CreateToggle("Enable ESP Master", ESP, "enabled")
+CreateToggle("Box ESP", ESP, "box")
+CreateToggle("Skeleton ESP", ESP, "skeleton")
+CreateToggle("Snaplines ESP", ESP, "line")
+CreateToggle("Healthbar ESP", ESP, "health")
+CreateToggle("Team Check (ESP)", ESP, "teamCheck")
+CreateSlider("Max Render Distance", ESP, "distanceCheck", 100, 15000, false)
