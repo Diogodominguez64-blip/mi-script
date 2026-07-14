@@ -1,6 +1,7 @@
--- DZ STORE Script para Roblox Fluxo PvP (Blatant Aimbot Integrado)
--- Version: 2.0 - Enhanced Performance + ESP
+-- Enhanced Aimbot with Mod Menu
+-- Version: 2.1 - Added FOV and Smoothness Editable (Fully Completed)
 
+-- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -8,164 +9,55 @@ local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
--- ==========================================
--- CONFIGURACIONES
--- ==========================================
+-- Aimbot Configuration
 local Aimbot = {
-    enabled = false,
-    silentAim = false,  -- Desactivado para modo blatant
-    fov = 999,          -- Maximum FOV for blatant targeting
-    smoothness = 0,     -- No smoothing for instant lock-on
+    enabled = true,
+    silentAim = false,
+    fov = 150,
+    smoothness = 0.3,
     aimKey = Enum.UserInputType.MouseButton2,
-    teamCheck = false,  -- Target everyone
-    showFov = false,    -- Hide FOV for stealth
+    teamCheck = false,
+    showFov = true,
     fovColor = Color3.fromRGB(255, 0, 0),
-    fovTransparency = 0.1,
-    bone = "Head",      -- Always aim for head
-    maxDistance = 10000,-- Maximum distance
+    fovTransparency = 0.3,
+    bone = "Head",
+    maxDistance = 10000,
     prediction = true,
-    predictionAmount = 0.25, -- Increased prediction
-    autoFire = false,   -- Toggleable en el menú
-    instantLock = true,
+    predictionAmount = 0.25,
+    autoFire = false,
+    instantLock = false,
     performanceMode = true
 }
 
-local ESP = {
-    skeletonEnabled = false,
-    lineEnabled = false,
-    teamCheck = false,
-    boxThickness = 1.5,
-    boxColor = Color3.fromRGB(255, 0, 100),
-    skeletonThickness = 1.5,
-    skeletonColor = Color3.fromRGB(255, 255, 255),
-    lineThickness = 1.5,
-    lineColor = Color3.fromRGB(255, 0, 100),
-    maxDistance = 1000
-}
-
--- ATAJOS DE TECLADO (Keybinds)
-local Keybinds = {
-    Menu = Enum.KeyCode.Insert,       -- Mostrar/Ocultar Menú
-    ToggleAimbot = Enum.KeyCode.V,    -- Activar/Desactivar Aimbot
-    ToggleAutoFire = Enum.KeyCode.C,  -- Activar/Desactivar Auto-Fire
-    ToggleSkeleton = Enum.KeyCode.X,  -- Activar/Desactivar Skeleton ESP
-    ToggleLine = Enum.KeyCode.Z       -- Activar/Desactivar Line ESP
-}
-
--- Performance optimization variables
-local lastTargetTime = 0
-local targetUpdateInterval = 0.016  -- ~60 FPS update rate
-local currentTarget = nil
+-- FOV Circle Drawing
+local fovCircle = Drawing.new("Circle")
+fovCircle.Color = Aimbot.fovColor
+fovCircle.Thickness = 1
+fovCircle.NumSides = 64
+fovCircle.Radius = Aimbot.fov
+fovCircle.Filled = false
+fovCircle.Transparency = Aimbot.fovTransparency
+fovCircle.Visible = Aimbot.showFov
 
 -- ==========================================
--- INTERFAZ GRÁFICA (GUI)
+-- AIMBOT LOGIC
 -- ==========================================
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DZ_STORE_GUI"
-ScreenGui.Parent = game:GetService("CoreGui")
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
-local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Name = "MainFrame"
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-MainFrame.BorderSizePixel = 0
-MainFrame.Position = UDim2.new(0.5, -200, 0.5, -150)
-MainFrame.Size = UDim2.new(0, 400, 0, 300)
-MainFrame.Visible = true
-
-local UICorner = Instance.new("UICorner", MainFrame)
-UICorner.CornerRadius = UDim.new(0, 10)
-
-local Title = Instance.new("TextLabel", MainFrame)
-Title.Name = "Title"
-Title.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-Title.Size = UDim2.new(1, 0, 0, 40)
-Title.Font = Enum.Font.GothamBold
-Title.Text = "DZ STORE - Blatant Mode"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 20
-Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 10)
-
-local function createButton(name, text, pos)
-    local btn = Instance.new("TextButton", MainFrame)
-    btn.Name = name
-    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-    btn.Position = pos
-    btn.Size = UDim2.new(0.4, 0, 0, 30)
-    btn.Font = Enum.Font.Gotham
-    btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.TextSize = 14
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
-    return btn
-end
-
-local AimbotButton = createButton("AimbotButton", "Blatant Aim [V]: OFF", UDim2.new(0.05, 0, 0.2, 0))
-local AutoFireButton = createButton("AutoFireButton", "Auto-Fire [C]: OFF", UDim2.new(0.55, 0, 0.2, 0))
-local ESPButton = createButton("ESPButton", "Skeleton ESP [X]: OFF", UDim2.new(0.05, 0, 0.35, 0))
-local LineButton = createButton("LineButton", "Line ESP [Z]: OFF", UDim2.new(0.55, 0, 0.35, 0))
-
--- Lógica de arrastre
-local dragging, dragInput, dragStart, startPos
-MainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true; dragStart = input.Position; startPos = MainFrame.Position
-    end
-end)
-MainFrame.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
-
-local function UpdateUIStates()
-    AimbotButton.Text = Aimbot.enabled and "Blatant Aim [V]: ON" or "Blatant Aim [V]: OFF"
-    AimbotButton.BackgroundColor3 = Aimbot.enabled and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(45, 45, 55)
-    
-    AutoFireButton.Text = Aimbot.autoFire and "Auto-Fire [C]: ON" or "Auto-Fire [C]: OFF"
-    AutoFireButton.BackgroundColor3 = Aimbot.autoFire and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(45, 45, 55)
-    
-    ESPButton.Text = ESP.skeletonEnabled and "Skeleton ESP [X]: ON" or "Skeleton ESP [X]: OFF"
-    ESPButton.BackgroundColor3 = ESP.skeletonEnabled and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(45, 45, 55)
-    
-    LineButton.Text = ESP.lineEnabled and "Line ESP [Z]: ON" or "Line ESP [Z]: OFF"
-    LineButton.BackgroundColor3 = ESP.lineEnabled and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(45, 45, 55)
-end
-
-AimbotButton.MouseButton1Click:Connect(function() Aimbot.enabled = not Aimbot.enabled; UpdateUIStates() end)
-AutoFireButton.MouseButton1Click:Connect(function() Aimbot.autoFire = not Aimbot.autoFire; UpdateUIStates() end)
-ESPButton.MouseButton1Click:Connect(function() ESP.skeletonEnabled = not ESP.skeletonEnabled; UpdateUIStates() end)
-LineButton.MouseButton1Click:Connect(function() ESP.lineEnabled = not ESP.lineEnabled; UpdateUIStates() end)
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Keybinds.Menu then MainFrame.Visible = not MainFrame.Visible
-    elseif input.KeyCode == Keybinds.ToggleAimbot then Aimbot.enabled = not Aimbot.enabled; UpdateUIStates()
-    elseif input.KeyCode == Keybinds.ToggleAutoFire then Aimbot.autoFire = not Aimbot.autoFire; UpdateUIStates()
-    elseif input.KeyCode == Keybinds.ToggleSkeleton then ESP.skeletonEnabled = not ESP.skeletonEnabled; UpdateUIStates()
-    elseif input.KeyCode == Keybinds.ToggleLine then ESP.lineEnabled = not ESP.lineEnabled; UpdateUIStates()
-    elseif input.KeyCode == Enum.KeyCode.F1 then Aimbot.enabled = not Aimbot.enabled; UpdateUIStates() -- Atajo extra solicitado
-    end
-end)
-
--- ==========================================
--- BLATANT AIMBOT LOGIC
--- ==========================================
+-- Function to check if a player is a valid target
 local function IsValidTarget(player)
     if player == LocalPlayer then return false end
-    if Aimbot.teamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then return false end
     
     local character = player.Character
     if not character or not character:FindFirstChild("Humanoid") or character.Humanoid.Health <= 0 then 
         return false 
     end
+    
+    if Aimbot.teamCheck and player.Team == LocalPlayer.Team then return false end
+    
     return true
 end
 
+-- Function to get the closest player to the cursor
 local function GetClosestPlayerToCursor()
     local closestPlayer = nil
     local shortestDistance = Aimbot.fov
@@ -178,7 +70,7 @@ local function GetClosestPlayerToCursor()
         if not targetBone then continue end
         
         local vector, onScreen = Camera:WorldToViewportPoint(targetBone.Position)
-        if not onScreen and Aimbot.fov < 999 then continue end -- Si es 999 FOV, ignora si está en pantalla
+        if not onScreen then continue end
         
         local mousePosition = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
         local bonePosition = Vector2.new(vector.X, vector.Y)
@@ -189,11 +81,14 @@ local function GetClosestPlayerToCursor()
             closestPlayer = player
         end
     end
+    
     return closestPlayer
 end
 
+-- Enhanced prediction function
 local function GetPredictedPosition(target)
     if not Aimbot.prediction then return target.Position end
+    
     local humanoid = target.Parent:FindFirstChild("Humanoid")
     if not humanoid then return target.Position end
     
@@ -202,16 +97,23 @@ local function GetPredictedPosition(target)
         velocity = velocity + humanoid.BodyVelocity.Velocity
     end
     
-    local distance = (LocalPlayer.Character.HumanoidRootPart.Position - target.Position).Magnitude
+    local distance = (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")) 
+        and (LocalPlayer.Character.HumanoidRootPart.Position - target.Position).Magnitude 
+        or (Camera.CFrame.Position - target.Position).Magnitude
+        
     local timeToReach = distance / 2000
     
     return target.Position + (velocity * timeToReach * Aimbot.predictionAmount)
 end
 
+-- Enhanced aim function
 local function AimAt(target)
-    if not target or not target.Character then return end
+    if not target then return end
     
-    local targetBone = target.Character:FindFirstChild(Aimbot.bone) or target.Character:FindFirstChild("HumanoidRootPart")
+    local character = target.Character
+    if not character then return end
+    
+    local targetBone = character:FindFirstChild(Aimbot.bone) or character:FindFirstChild("HumanoidRootPart")
     if not targetBone then return end
     
     local targetPosition = GetPredictedPosition(targetBone)
@@ -220,8 +122,8 @@ local function AimAt(target)
         Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPosition)
     else
         local currentLook = Camera.CFrame.LookVector
-        local dir = (targetPosition - Camera.CFrame.Position).Unit
-        local newLook = currentLook:Lerp(dir, 1 - Aimbot.smoothness)
+        local targetDir = (targetPosition - Camera.CFrame.Position).Unit
+        local newLook = currentLook:Lerp(targetDir, 1 - Aimbot.smoothness)
         Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + newLook)
     end
     
@@ -234,53 +136,33 @@ local function AimAt(target)
     end
 end
 
--- ==========================================
--- ESP LOGIC
--- ==========================================
-local ESP_Drawings = {}
+-- Optimized main update function
+local lastTargetTime = 0
+local targetUpdateInterval = 0.016
+local currentTarget = nil
 
-local function createDrawings(player)
-    local drawings = { Line = Drawing.new("Line"), Skeleton = {} }
-    local bones = {
-        {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
-        {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
-        {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
-        {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"},
-        {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"}
-    }
+local function OnRender()
+    -- Update FOV circle
+    fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    fovCircle.Radius = Aimbot.fov
+    fovCircle.Visible = Aimbot.enabled and Aimbot.showFov
+
+    if not Aimbot.enabled then return end
     
-    for i = 1, #bones do
-        local line = Drawing.new("Line")
-        line.Thickness = ESP.skeletonThickness
-        line.Color = ESP.skeletonColor
-        line.Transparency = 1
-        drawings.Skeleton[i] = {line = line, parts = bones[i]}
-    end
-    
-    drawings.Line.Thickness = ESP.lineThickness
-    drawings.Line.Color = ESP.lineColor
-    ESP_Drawings[player] = drawings
-end
-
-Players.PlayerRemoving:Connect(function(player)
-    if ESP_Drawings[player] then
-        ESP_Drawings[player].Line:Remove()
-        for _, obj in pairs(ESP_Drawings[player].Skeleton) do obj.line:Remove() end
-        ESP_Drawings[player] = nil
-    end
-end)
-
--- ==========================================
--- MAIN LOOP (RENDERING & AIMBOT)
--- ==========================================
-RunService.RenderStepped:Connect(function()
-    -- 1. BLATANT AIMBOT LOOP
-    if Aimbot.enabled then
-        local currentTime = tick()
-        if not Aimbot.performanceMode or (currentTime - lastTargetTime) > targetUpdateInterval then
-            lastTargetTime = currentTime
-            
-            if Aimbot.instantLock then
+    local currentTime = tick()
+    if not Aimbot.performanceMode or (currentTime - lastTargetTime) > targetUpdateInterval then
+        lastTargetTime = currentTime
+        
+        if Aimbot.instantLock then
+            local target = GetClosestPlayerToCursor()
+            if target then
+                currentTarget = target
+                AimAt(target)
+            else
+                currentTarget = nil
+            end
+        else
+            if UserInputService:IsMouseButtonPressed(Aimbot.aimKey) then
                 local target = GetClosestPlayerToCursor()
                 if target then
                     currentTarget = target
@@ -289,85 +171,195 @@ RunService.RenderStepped:Connect(function()
                     currentTarget = nil
                 end
             else
-                if UserInputService:IsMouseButtonPressed(Aimbot.aimKey) then
-                    local target = GetClosestPlayerToCursor()
-                    if target then
-                        currentTarget = target
-                        AimAt(target)
-                    else
-                        currentTarget = nil
-                    end
-                else
-                    currentTarget = nil
-                end
-            end
-        else
-            if currentTarget and IsValidTarget(currentTarget) then
-                AimAt(currentTarget)
-            else
                 currentTarget = nil
             end
         end
-    end
-
-    -- 2. ESP LOOP
-    for _, player in pairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        
-        if not ESP_Drawings[player] then createDrawings(player) end
-        
-        local drawings = ESP_Drawings[player]
-        local isEnemy = IsValidTarget(player) 
-        local character = player.Character
-        local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-        
-        local shouldDraw = isEnemy and (ESP.skeletonEnabled or ESP.lineEnabled)
-        
-        if shouldDraw and rootPart then
-            local rootPos, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
-            local distance = (Camera.CFrame.Position - rootPart.Position).Magnitude
-            
-            if onScreen and distance < ESP.maxDistance then
-                -- Tracers (Line ESP)
-                if ESP.lineEnabled then
-                    drawings.Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                    drawings.Line.To = Vector2.new(rootPos.X, rootPos.Y)
-                    drawings.Line.Visible = true
-                else
-                    drawings.Line.Visible = false
-                end
-                
-                -- Skeleton ESP
-                if ESP.skeletonEnabled then
-                    for _, boneData in pairs(drawings.Skeleton) do
-                        local part1 = character:FindFirstChild(boneData.parts[1]) or character:FindFirstChild("Torso")
-                        local part2 = character:FindFirstChild(boneData.parts[2]) or character:FindFirstChild("Torso")
-                        
-                        if part1 and part2 then
-                            local pos1, vis1 = Camera:WorldToViewportPoint(part1.Position)
-                            local pos2, vis2 = Camera:WorldToViewportPoint(part2.Position)
-                            
-                            if vis1 or vis2 then
-                                boneData.line.From = Vector2.new(pos1.X, pos1.Y)
-                                boneData.line.To = Vector2.new(pos2.X, pos2.Y)
-                                boneData.line.Visible = true
-                            else
-                                boneData.line.Visible = false
-                            end
-                        else
-                            boneData.line.Visible = false
-                        end
-                    end
-                else
-                    for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
-                end
-            else
-                drawings.Line.Visible = false
-                for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
-            end
+    else
+        if currentTarget and IsValidTarget(currentTarget) then
+            AimAt(currentTarget)
         else
-            drawings.Line.Visible = false
-            for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
+            currentTarget = nil
         end
+    end
+end
+
+RunService.RenderStepped:Connect(OnRender)
+
+-- ==========================================
+-- MOD MENU GUI
+-- ==========================================
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "EnhancedAimbotGUI"
+ScreenGui.Parent = game:GetService("CoreGui")
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Parent = ScreenGui
+MainFrame.Size = UDim2.new(0, 300, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -150, 0.5, -210)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true -- Habilita arrastrar el menú desde la barra superior
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Parent = MainFrame
+TitleBar.Size = UDim2.new(1, 0, 0, 30)
+TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+TitleBar.BorderSizePixel = 0
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 8)
+TitleCorner.Parent = TitleBar
+
+-- Fix bottom corners of TitleBar to blend with MainFrame
+local TitleBottomCover = Instance.new("Frame")
+TitleBottomCover.Parent = TitleBar
+TitleBottomCover.Size = UDim2.new(1, 0, 0, 8)
+TitleBottomCover.Position = UDim2.new(0, 0, 1, -8)
+TitleBottomCover.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+TitleBottomCover.BorderSizePixel = 0
+
+local Title = Instance.new("TextLabel")
+Title.Parent = TitleBar
+Title.Size = UDim2.new(1, 0, 1, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "Enhanced Aimbot v2.1"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 14
+Title.Font = Enum.Font.SourceSansBold
+
+local ContentFrame = Instance.new("ScrollingFrame")
+ContentFrame.Parent = MainFrame
+ContentFrame.Size = UDim2.new(1, -10, 1, -40)
+ContentFrame.Position = UDim2.new(0, 5, 0, 35)
+ContentFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ContentFrame.BorderSizePixel = 0
+ContentFrame.ScrollBarThickness = 4
+ContentFrame.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
+ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 350) -- Altura ajustable según contenido
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.Parent = ContentFrame
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 8)
+UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+-- Helpers para crear UI
+local layoutOrder = 0
+
+local function CreateToggle(name, configKey)
+    layoutOrder = layoutOrder + 1
+    local container = Instance.new("Frame")
+    container.Parent = ContentFrame
+    container.Size = UDim2.new(1, -10, 0, 30)
+    container.BackgroundTransparency = 1
+    container.LayoutOrder = layoutOrder
+
+    local label = Instance.new("TextLabel")
+    label.Parent = container
+    label.Size = UDim2.new(0.7, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = " " .. name
+    label.TextColor3 = Color3.fromRGB(200, 200, 200)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Font = Enum.Font.SourceSans
+
+    local btn = Instance.new("TextButton")
+    btn.Parent = container
+    btn.Size = UDim2.new(0, 40, 0, 20)
+    btn.Position = UDim2.new(1, -45, 0.5, -10)
+    btn.BackgroundColor3 = Aimbot[configKey] and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    btn.Text = Aimbot[configKey] and "ON" or "OFF"
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.SourceSansBold
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+
+    btn.MouseButton1Click:Connect(function()
+        Aimbot[configKey] = not Aimbot[configKey]
+        btn.BackgroundColor3 = Aimbot[configKey] and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+        btn.Text = Aimbot[configKey] and "ON" or "OFF"
+    end)
+end
+
+local function CreateSlider(name, configKey, min, max, isDecimal)
+    layoutOrder = layoutOrder + 1
+    local container = Instance.new("Frame")
+    container.Parent = ContentFrame
+    container.Size = UDim2.new(1, -10, 0, 45)
+    container.BackgroundTransparency = 1
+    container.LayoutOrder = layoutOrder
+
+    local label = Instance.new("TextLabel")
+    label.Parent = container
+    label.Size = UDim2.new(1, 0, 0, 20)
+    label.BackgroundTransparency = 1
+    label.Text = string.format("%s: %s", name, tostring(Aimbot[configKey]))
+    label.TextColor3 = Color3.fromRGB(200, 200, 200)
+    label.Font = Enum.Font.SourceSans
+
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Parent = container
+    sliderBg.Size = UDim2.new(1, -20, 0, 6)
+    sliderBg.Position = UDim2.new(0, 10, 0, 25)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    Instance.new("UICorner", sliderBg).CornerRadius = UDim.new(1, 0)
+
+    local fill = Instance.new("Frame")
+    fill.Parent = sliderBg
+    fill.Size = UDim2.new((Aimbot[configKey] - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+
+    local btn = Instance.new("TextButton")
+    btn.Parent = sliderBg
+    btn.Size = UDim2.new(1, 0, 1, 20)
+    btn.Position = UDim2.new(0, 0, 0, -10)
+    btn.BackgroundTransparency = 1
+    btn.Text = ""
+
+    local isSliding = false
+    btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then isSliding = true end
+    end)
+    btn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then isSliding = false end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if isSliding and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local relativeX = math.clamp(input.Position.X - sliderBg.AbsolutePosition.X, 0, sliderBg.AbsoluteSize.X)
+            local percentage = relativeX / sliderBg.AbsoluteSize.X
+            fill.Size = UDim2.new(percentage, 0, 1, 0)
+            
+            local value = min + ((max - min) * percentage)
+            if not isDecimal then value = math.floor(value) else value = math.floor(value * 100) / 100 end
+            
+            Aimbot[configKey] = value
+            label.Text = string.format("%s: %s", name, tostring(value))
+        end
+    end)
+end
+
+-- Popular el Menú
+CreateToggle("Enable Aimbot", "enabled")
+CreateToggle("Show FOV Circle", "showFov")
+CreateToggle("Team Check", "teamCheck")
+CreateToggle("Instant Lock", "instantLock")
+CreateToggle("Auto Fire", "autoFire")
+CreateToggle("Performance Mode", "performanceMode")
+
+CreateSlider("FOV Radius", "fov", 10, 800, false)
+CreateSlider("Smoothness", "smoothness", 0, 0.99, true)
+
+-- Toggle Menu Visibility with Insert Key
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.Insert then
+        MainFrame.Visible = not MainFrame.Visible
     end
 end)
