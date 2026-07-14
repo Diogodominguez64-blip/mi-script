@@ -1,6 +1,6 @@
 -- ==========================================
--- DZ STORE V1 - Enhanced Blatant Aimbot & ESP
--- Optimized for Performance & High FPS
+-- DZ STORE V1 - Stable Aimbot & Clean ESP
+-- Version: 3.5 (Optimized for Mobile & PC)
 -- ==========================================
 
 -- Services
@@ -21,7 +21,6 @@ local Aimbot = {
     fovColor = Color3.fromRGB(255, 50, 75),
     fovTransparency = 0.5,
     bone = "Head",
-    maxDistance = 10000,
     prediction = true,
     predictionAmount = 0.25,
     autoFire = false,
@@ -30,22 +29,14 @@ local Aimbot = {
 }
 
 local ESP = {
-    enabled = true,
-    skeleton = true,
-    box = true,
-    health = true,
-    line = true,
-    teamCheck = false,
-    distanceCheck = 10000,
-    boxColor = Color3.fromRGB(255, 50, 75),
-    boxTransparency = 0.6,
-    lineColor = Color3.fromRGB(255, 255, 255),
-    lineTransparency = 0.5,
-    healthBarColor = Color3.fromRGB(0, 255, 100),
-    healthBarTransparency = 0.7,
-    healthBarHeight = 5,
-    healthBarWidth = 50,
-    performanceMode = true
+    skeletonEnabled = true,
+    lineEnabled = true,
+    skeletonThickness = 1.5,
+    skeletonColor = Color3.fromRGB(255, 255, 255),
+    lineThickness = 1.5,
+    lineColor = Color3.fromRGB(255, 50, 75),
+    maxDistance = 3000,
+    teamCheck = false
 }
 
 -- FOV Circle Graphic
@@ -58,14 +49,8 @@ fovCircle.Filled = false
 fovCircle.Transparency = Aimbot.fovTransparency
 fovCircle.Visible = Aimbot.showFov
 
--- Caching tables for performance optimization
-local activePlayers = {}
-local lastTargetTime = 0
-local targetUpdateInterval = 0.016
-local currentTarget = nil
-
 -- ==========================================
--- CORE UTILITIES & VALIDATION
+-- CORE VALIDATION FUNCTIONS
 -- ==========================================
 
 local function IsValidTarget(player)
@@ -76,10 +61,14 @@ local function IsValidTarget(player)
         return false 
     end
     
+    if Aimbot.teamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then 
+        return false 
+    end
+    
     return true
 end
 
-local function IsESPValidTarget(player)
+local function IsESPValid(player)
     if player == LocalPlayer then return false end
     if ESP.teamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then return false end
     
@@ -100,7 +89,6 @@ local function GetClosestPlayerToCursor()
     
     for _, player in ipairs(Players:GetPlayers()) do
         if not IsValidTarget(player) then continue end
-        if Aimbot.teamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then continue end
         
         local character = player.Character
         local targetBone = character:FindFirstChild(Aimbot.bone) or character:FindFirstChild("HumanoidRootPart")
@@ -164,159 +152,55 @@ local function AimAt(target)
 end
 
 -- ==========================================
--- ADVANCED ADVANCED ESP CORE LOGIC
+-- STABLE SKELETON & LINE ESP LOGIC
 -- ==========================================
 
-local function ClearPlayerESP(player)
-    if activePlayers[player] then
-        local data = activePlayers[player]
-        if data.box then data.box:Remove() end
-        if data.line then data.line:Remove() end
-        if data.healthBar then data.healthBar:Remove() end
-        if data.skeleton then
-            for _, boneLine in pairs(data.skeleton) do
-                boneLine:Remove()
-            end
-        end
-        activePlayers[player] = nil
+local ESP_Drawings = {}
+
+local function createDrawings(player)
+    local drawings = { Line = Drawing.new("Line"), Skeleton = {} }
+    
+    -- R15 / R6 Universal bone structure maps
+    local bones = {
+        {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+        {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"},
+        {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"},
+        {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"},
+        {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}
+    }
+    
+    for i = 1, #bones do
+        local line = Drawing.new("Line")
+        line.Thickness = ESP.skeletonThickness
+        line.Color = ESP.skeletonColor
+        line.Transparency = 1
+        drawings.Skeleton[i] = {line = line, parts = bones[i]}
     end
+    
+    drawings.Line.Thickness = ESP.lineThickness
+    drawings.Line.Color = ESP.lineColor
+    drawings.Line.Transparency = 1
+    
+    ESP_Drawings[player] = drawings
 end
 
-local function UpdatePlayerESP(player)
-    local character = player.Character
-    if not character then return end
-
-    local humanoid = character:FindFirstChild("Humanoid")
-    local head = character:FindFirstChild("Head")
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not humanoid or not head or not rootPart then return end
-
-    local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local distance = localRoot and (rootPart.Position - localRoot.Position).Magnitude or (Camera.CFrame.Position - rootPart.Position).Magnitude
-    
-    if distance > ESP.distanceCheck then 
-        ClearPlayerESP(player)
-        return 
-    end
-
-    if not activePlayers[player] then
-        activePlayers[player] = { skeleton = {} }
-    end
-    local data = activePlayers[player]
-
-    -- Render Box Layout
-    if ESP.box and ESP.enabled then
-        if not data.box then
-            data.box = Drawing.new("Square")
-            data.box.Thickness = 1.5
-            data.box.Filled = false
-        end
-        data.box.Color = ESP.boxColor
-        data.box.Transparency = ESP.boxTransparency
-        
-        local screenPoint, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
-        if onScreen then
-            local scale = 1.5
-            data.box.Size = Vector2.new(100 * scale, 200 * scale)
-            data.box.Position = Vector2.new(screenPoint.X - data.box.Size.X / 2, screenPoint.Y - data.box.Size.Y / 2)
-            data.box.Visible = true
-        else
-            data.box.Visible = false
-        end
-    elseif data.box then
-        data.box.Visible = false
-    end
-
-    -- Render Head-to-Root Lines
-    if ESP.line and ESP.enabled then
-        if not data.line then
-            data.line = Drawing.new("Line")
-            data.line.Thickness = 1.5
-        end
-        data.line.Color = ESP.lineColor
-        data.line.Transparency = ESP.lineTransparency
-        
-        local rootScreenPoint, rootOnScreen = Camera:WorldToViewportPoint(rootPart.Position)
-        local headScreenPoint, headOnScreen = Camera:WorldToViewportPoint(head.Position)
-        if rootOnScreen and headOnScreen then
-            data.line.From = Vector2.new(rootScreenPoint.X, rootScreenPoint.Y)
-            data.line.To = Vector2.new(headScreenPoint.X, headScreenPoint.Y)
-            data.line.Visible = true
-        else
-            data.line.Visible = false
-        end
-    elseif data.line then
-        data.line.Visible = false
-    end
-
-    -- Render Health Metrics
-    if ESP.health and ESP.enabled then
-        if not data.healthBar then
-            data.healthBar = Drawing.new("Square")
-            data.healthBar.Thickness = 1
-            data.healthBar.Filled = true
-        end
-        data.healthBar.Color = ESP.healthBarColor
-        data.healthBar.Transparency = ESP.healthBarTransparency
-        
-        local screenPoint, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
-        if onScreen then
-            data.healthBar.Position = Vector2.new(screenPoint.X - ESP.healthBarWidth / 2, screenPoint.Y - 22)
-            data.healthBar.Size = Vector2.new(ESP.healthBarWidth * (math.clamp(humanoid.Health, 0, humanoid.MaxHealth) / humanoid.MaxHealth), ESP.healthBarHeight)
-            data.healthBar.Visible = true
-        else
-            data.healthBar.Visible = false
-        end
-    elseif data.healthBar then
-        data.healthBar.Visible = false
-    end
-
-    -- Render Full Real-Time Skeleton
-    if ESP.skeleton and ESP.enabled then
-        local bones = {
-            {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
-            {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"},
-            {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"},
-            {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"},
-            {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}
-        }
-        
-        for i, boneRelation in ipairs(bones) do
-            local p1 = character:FindFirstChild(boneRelation[1]) or character:FindFirstChild("Torso")
-            local p2 = character:FindFirstChild(boneRelation[2]) or character:FindFirstChild("Torso")
-            
-            if p1 and p2 then
-                if not data.skeleton[i] then
-                    data.skeleton[i] = Drawing.new("Line")
-                    data.skeleton[i].Thickness = 1.5
-                end
-                data.skeleton[i].Color = ESP.lineColor
-                data.skeleton[i].Transparency = ESP.lineTransparency
-                
-                local pos1, vis1 = Camera:WorldToViewportPoint(p1.Position)
-                local pos2, vis2 = Camera:WorldToViewportPoint(p2.Position)
-                
-                if vis1 or vis2 then
-                    data.skeleton[i].From = Vector2.new(pos1.X, pos1.Y)
-                    data.skeleton[i].To = Vector2.new(pos2.X, pos2.Y)
-                    data.skeleton[i].Visible = true
-                else
-                    data.skeleton[i].Visible = false
-                end
-            elseif data.skeleton[i] then
-                data.skeleton[i].Visible = false
-            end
-        end
-    elseif data.skeleton then
-        for _, boneLine in pairs(data.skeleton) do boneLine.Visible = false end
+local function ClearPlayerESP(player)
+    if ESP_Drawings[player] then
+        ESP_Drawings[player].Line:Remove()
+        for _, obj in pairs(ESP_Drawings[player].Skeleton) do obj.line:Remove() end
+        ESP_Drawings[player] = nil
     end
 end
 
 Players.PlayerRemoving:Connect(ClearPlayerESP)
 
 -- ==========================================
--- MAIN ENGINE TICK
+-- MAIN TICK RUNNER
 -- ==========================================
+
+local lastTargetTime = 0
+local targetUpdateInterval = 0.016
+local currentTarget = nil
 
 RunService.RenderStepped:Connect(function()
     -- Sync FOV Display Object
@@ -350,29 +234,75 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- Run ESP Logic Subsystem
-    local espTime = tick()
-    if not ESP.performanceMode or (espTime - lastTargetTime) > targetUpdateInterval then
-        for player, _ in pairs(activePlayers) do
-            if not IsESPValidTarget(player) then
-                ClearPlayerESP(player)
-            end
+    -- Run Stable ESP Logic Subsystem
+    for _, player in pairs(Players:GetPlayers()) do
+        if not IsESPValid(player) then
+            ClearPlayerESP(player)
+            continue
         end
-
-        for _, player in ipairs(Players:GetPlayers()) do
-            if IsESPValidTarget(player) then
-                UpdatePlayerESP(player)
+        
+        if not ESP_Drawings[player] then createDrawings(player) end
+        
+        local drawings = ESP_Drawings[player]
+        local character = player.Character
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        
+        if rootPart then
+            local rootPos, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+            local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            local distance = localRoot and (localRoot.Position - rootPart.Position).Magnitude or (Camera.CFrame.Position - rootPart.Position).Magnitude
+            
+            if onScreen and distance < ESP.maxDistance then
+                -- Tracers (Snaplines)
+                if ESP.lineEnabled then
+                    drawings.Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                    drawings.Line.To = Vector2.new(rootPos.X, rootPos.Y)
+                    drawings.Line.Visible = true
+                else
+                    drawings.Line.Visible = false
+                end
+                
+                -- Skeleton Mapping
+                if ESP.skeletonEnabled then
+                    for _, boneData in pairs(drawings.Skeleton) do
+                        local part1 = character:FindFirstChild(boneData.parts[1]) or character:FindFirstChild("Torso")
+                        local part2 = character:FindFirstChild(boneData.parts[2]) or character:FindFirstChild("Torso")
+                        
+                        if part1 and part2 then
+                            local pos1, vis1 = Camera:WorldToViewportPoint(part1.Position)
+                            local pos2, vis2 = Camera:WorldToViewportPoint(part2.Position)
+                            
+                            if vis1 or vis2 then
+                                boneData.line.From = Vector2.new(pos1.X, pos1.Y)
+                                boneData.line.To = Vector2.new(pos2.X, pos2.Y)
+                                boneData.line.Visible = true
+                            else
+                                boneData.line.Visible = false
+                            end
+                        else
+                            boneData.line.Visible = false
+                        end
+                    end
+                else
+                    for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
+                end
+            else
+                drawings.Line.Visible = false
+                for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
             end
+        else
+            drawings.Line.Visible = false
+            for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
         end
     end
 end)
 
 -- ==========================================
--- MOD MENU GUI CREATION (DZ STORE V1 STYLE)
+-- MOD MENU GUI CREATION (DZ STORE V1)
 -- ==========================================
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DZ_STORE_V1_PANEL"
+ScreenGui.Name = "DZ_STORE_V1"
 ScreenGui.Parent = game:GetService("CoreGui")
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
@@ -385,7 +315,19 @@ local Colors = {
     Inactive = Color3.fromRGB(45, 45, 55)
 }
 
--- Mobile Floating Toggle Button (Open & Close Menu)
+-- Panel Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Parent = ScreenGui
+MainFrame.Size = UDim2.new(0, 320, 0, 430)
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -215)
+MainFrame.BackgroundColor3 = Colors.Background
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+MainFrame.Visible = false -- Starts hidden, press floating button to open
+
+-- Mobile Floating Button (Open / Close System)
 local MobileFloatingButton = Instance.new("TextButton")
 MobileFloatingButton.Parent = ScreenGui
 MobileFloatingButton.Size = UDim2.new(0, 50, 0, 50)
@@ -398,21 +340,9 @@ MobileFloatingButton.TextSize = 16
 MobileFloatingButton.BorderSizePixel = 0
 Instance.new("UICorner", MobileFloatingButton).CornerRadius = UDim.new(1, 0)
 MobileFloatingButton.Active = true
-MobileFloatingButton.Draggable = true -- Allows mobile players to drag it anywhere
+MobileFloatingButton.Draggable = true
 
--- Main Panel Frame
-local MainFrame = Instance.new("Frame")
-MainFrame.Parent = ScreenGui
-MainFrame.Size = UDim2.new(0, 320, 0, 460)
-MainFrame.Position = UDim2.new(0.5, -160, 0.5, -230)
-MainFrame.BackgroundColor3 = Colors.Background
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Draggable = true
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
-MainFrame.Visible = false
-
--- Title Bar Top Layout
+-- Title Bar Layout
 local TitleBar = Instance.new("Frame")
 TitleBar.Parent = MainFrame
 TitleBar.Size = UDim2.new(1, 0, 0, 45)
@@ -450,22 +380,22 @@ CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.TextSize = 16
 
--- Toggle Visual State Configurations
-local function ToggleMenuState()
+-- Toggle Menu Visibility Handlers
+local function ToggleMenu()
     MainFrame.Visible = not MainFrame.Visible
 end
 
-MobileFloatingButton.MouseButton1Click:Connect(ToggleMenuState)
-CloseBtn.MouseButton1Click:Connect(ToggleMenuState)
+MobileFloatingButton.MouseButton1Click:Connect(ToggleMenu)
+CloseBtn.MouseButton1Click:Connect(ToggleMenu)
 
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.KeyCode == Enum.KeyCode.Insert then
-        ToggleMenuState()
+        ToggleMenu()
     end
 end)
 
--- Main Dynamic Scroll Area
+-- Main Dynamic Scroll UI Area
 local ContentFrame = Instance.new("ScrollingFrame")
 ContentFrame.Parent = MainFrame
 ContentFrame.Size = UDim2.new(1, -16, 1, -60)
@@ -474,7 +404,7 @@ ContentFrame.BackgroundColor3 = Colors.Background
 ContentFrame.BorderSizePixel = 0
 ContentFrame.ScrollBarThickness = 4
 ContentFrame.ScrollBarImageColor3 = Colors.Accent
-ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 550)
+ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 480)
 
 local UIListLayout = Instance.new("UIListLayout")
 UIListLayout.Parent = ContentFrame
@@ -484,7 +414,7 @@ UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
 local layoutOrder = 0
 
--- UI Component: Functional Option Toggle
+-- UI Component: Toggle Button
 local function CreateToggle(name, tableRef, configKey)
     layoutOrder = layoutOrder + 1
     local container = Instance.new("Frame")
@@ -523,7 +453,7 @@ local function CreateToggle(name, tableRef, configKey)
     end)
 end
 
--- UI Component: Scale/Value Sliders
+-- UI Component: Custom Slider
 local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
     layoutOrder = layoutOrder + 1
     local container = Instance.new("Frame")
@@ -565,14 +495,11 @@ local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
     btn.Text = ""
 
     local isSliding = false
-    local function StartSlide() isSliding = true end
-    local function EndSlide() isSliding = false end
-
     btn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then StartSlide() end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then isSliding = true end
     end)
     UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then EndSlide() end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then isSliding = false end
     end)
 
     UserInputService.InputChanged:Connect(function(input)
@@ -604,9 +531,9 @@ local function CreateSection(text)
 end
 
 -- ==========================================
--- MENU ASSIGNMENT POPULATION
+-- POPULATE MENU OBJECTS
 -- ==========================================
-CreateSection("AIMBOT OPTIONS")
+CreateSection("AIMBOT SYSTEM")
 CreateToggle("Enable Aimbot", Aimbot, "enabled")
 CreateToggle("Instant Lock", Aimbot, "instantLock")
 CreateToggle("Auto Fire", Aimbot, "autoFire")
@@ -615,11 +542,8 @@ CreateToggle("Show FOV Circle", Aimbot, "showFov")
 CreateSlider("FOV Radius", Aimbot, "fov", 10, 800, false)
 CreateSlider("Smoothness", Aimbot, "smoothness", 0, 0.99, true)
 
-CreateSection("ESP VISUAL OPTIONS")
-CreateToggle("Enable ESP Master", ESP, "enabled")
-CreateToggle("Box ESP", ESP, "box")
-CreateToggle("Skeleton ESP", ESP, "skeleton")
-CreateToggle("Snaplines ESP", ESP, "line")
-CreateToggle("Healthbar ESP", ESP, "health")
+CreateSection("VISUAL METRICS (ESP)")
+CreateToggle("Skeleton ESP", ESP, "skeletonEnabled")
+CreateToggle("Snaplines (Tracers)", ESP, "lineEnabled")
 CreateToggle("Team Check (ESP)", ESP, "teamCheck")
-CreateSlider("Max Render Distance", ESP, "distanceCheck", 100, 15000, false)
+CreateSlider("Max Distance", ESP, "maxDistance", 100, 10000, false)
