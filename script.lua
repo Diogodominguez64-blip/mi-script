@@ -1,6 +1,6 @@
 -- ==========================================
--- DZ STORE V1 - Stable Aimbot & Clean ESP
--- Version: 3.5 (Optimized for Mobile & PC)
+-- DZ STORE V1 - Aimbot + ESP + Silent Aim
+-- Version: 3.6 (Integrated Tool Auto-Shoot)
 -- ==========================================
 
 -- Services
@@ -25,7 +25,10 @@ local Aimbot = {
     predictionAmount = 0.25,
     autoFire = false,
     instantLock = false,
-    performanceMode = true
+    performanceMode = true,
+    -- Silent Aim Settings
+    silentAim = false,
+    silentAimPart = "Head"
 }
 
 local ESP = {
@@ -78,6 +81,73 @@ local function IsESPValid(player)
     end
     return true
 end
+
+-- ==========================================
+-- SILENT AIM (TOOL AUTO-SHOOT) LOGIC
+-- ==========================================
+
+local function FindClosestEnemyByDistance()
+    local closestEnemy = nil
+    local closestDistance = math.huge
+    local character = LocalPlayer.Character
+    local localRoot = character and character:FindFirstChild("HumanoidRootPart")
+    
+    if not localRoot then return nil end
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if not IsValidTarget(player) then continue end
+        
+        local enemyPart = player.Character:FindFirstChild(Aimbot.silentAimPart)
+        if enemyPart then
+            local distance = (enemyPart.Position - localRoot.Position).Magnitude
+            if distance < closestDistance then
+                closestDistance = distance
+                closestEnemy = player
+            end
+        end
+    end
+    return closestEnemy
+end
+
+local function ExecuteSilentAim()
+    if not Aimbot.silentAim then return end
+    
+    local closestEnemy = FindClosestEnemyByDistance()
+    if closestEnemy and closestEnemy.Character then
+        local enemyPart = closestEnemy.Character:FindFirstChild(Aimbot.silentAimPart)
+        local character = LocalPlayer.Character
+        local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+        
+        if enemyPart and rootPart then
+            -- Raycast para verificar línea de visión (Line of Sight)
+            local raycastParams = RaycastParams.new()
+            raycastParams.FilterDescendantsInstances = {character}
+            raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+            
+            -- Dispara el rayo desde tu RootPart hacia el enemigo
+            local direction = (enemyPart.Position - rootPart.Position).Unit * 500
+            local raycastResult = workspace:Raycast(rootPart.Position, direction, raycastParams)
+            
+            -- Si el rayo golpea al enemigo o no hay paredes bloqueando
+            if raycastResult and raycastResult.Instance:IsDescendantOf(closestEnemy.Character) then
+                local tool = character:FindFirstChildOfClass("Tool")
+                if tool then
+                    tool:Activate()
+                end
+            end
+        end
+    end
+end
+
+-- Trigger Manual por Click
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if Aimbot.silentAim then
+            ExecuteSilentAim()
+        end
+    end
+end)
 
 -- ==========================================
 -- BLATANT AIMBOT CORE LOGIC
@@ -159,8 +229,6 @@ local ESP_Drawings = {}
 
 local function createDrawings(player)
     local drawings = { Line = Drawing.new("Line"), Skeleton = {} }
-    
-    -- R15 / R6 Universal bone structure maps
     local bones = {
         {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
         {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"},
@@ -195,20 +263,25 @@ end
 Players.PlayerRemoving:Connect(ClearPlayerESP)
 
 -- ==========================================
--- MAIN TICK RUNNER
+-- MAIN TICK RUNNERS
 -- ==========================================
 
 local lastTargetTime = 0
 local targetUpdateInterval = 0.016
 local currentTarget = nil
 
+-- Heartbeat para el Silent Aim Constante
+RunService.Heartbeat:Connect(function()
+    if Aimbot.silentAim then
+        ExecuteSilentAim()
+    end
+end)
+
 RunService.RenderStepped:Connect(function()
-    -- Sync FOV Display Object
     fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     fovCircle.Radius = Aimbot.fov
     fovCircle.Visible = Aimbot.enabled and Aimbot.showFov
 
-    -- Run Aimbot Logic Subsystem
     if Aimbot.enabled then
         local currentTime = tick()
         if not Aimbot.performanceMode or (currentTime - lastTargetTime) > targetUpdateInterval then
@@ -234,7 +307,6 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- Run Stable ESP Logic Subsystem
     for _, player in pairs(Players:GetPlayers()) do
         if not IsESPValid(player) then
             ClearPlayerESP(player)
@@ -253,7 +325,6 @@ RunService.RenderStepped:Connect(function()
             local distance = localRoot and (localRoot.Position - rootPart.Position).Magnitude or (Camera.CFrame.Position - rootPart.Position).Magnitude
             
             if onScreen and distance < ESP.maxDistance then
-                -- Tracers (Snaplines)
                 if ESP.lineEnabled then
                     drawings.Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
                     drawings.Line.To = Vector2.new(rootPos.X, rootPos.Y)
@@ -262,7 +333,6 @@ RunService.RenderStepped:Connect(function()
                     drawings.Line.Visible = false
                 end
                 
-                -- Skeleton Mapping
                 if ESP.skeletonEnabled then
                     for _, boneData in pairs(drawings.Skeleton) do
                         local part1 = character:FindFirstChild(boneData.parts[1]) or character:FindFirstChild("Torso")
@@ -315,7 +385,6 @@ local Colors = {
     Inactive = Color3.fromRGB(45, 45, 55)
 }
 
--- Panel Frame
 local MainFrame = Instance.new("Frame")
 MainFrame.Parent = ScreenGui
 MainFrame.Size = UDim2.new(0, 320, 0, 430)
@@ -325,9 +394,8 @@ MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
-MainFrame.Visible = false -- Starts hidden, press floating button to open
+MainFrame.Visible = false
 
--- Mobile Floating Button (Open / Close System)
 local MobileFloatingButton = Instance.new("TextButton")
 MobileFloatingButton.Parent = ScreenGui
 MobileFloatingButton.Size = UDim2.new(0, 50, 0, 50)
@@ -342,15 +410,12 @@ Instance.new("UICorner", MobileFloatingButton).CornerRadius = UDim.new(1, 0)
 MobileFloatingButton.Active = true
 MobileFloatingButton.Draggable = true
 
--- Title Bar Layout
 local TitleBar = Instance.new("Frame")
 TitleBar.Parent = MainFrame
 TitleBar.Size = UDim2.new(1, 0, 0, 45)
 TitleBar.BackgroundColor3 = Colors.Accent
 TitleBar.BorderSizePixel = 0
-local TitleCorner = Instance.new("UICorner")
-TitleCorner.CornerRadius = UDim.new(0, 10)
-TitleCorner.Parent = TitleBar
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 10)
 local TitleBottomCover = Instance.new("Frame")
 TitleBottomCover.Parent = TitleBar
 TitleBottomCover.Size = UDim2.new(1, 0, 0, 10)
@@ -369,7 +434,6 @@ Title.TextSize = 18
 Title.Font = Enum.Font.GothamBlack
 Title.TextXAlignment = Enum.TextXAlignment.Left
 
--- Desktop GUI Inline Close Button
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Parent = TitleBar
 CloseBtn.Size = UDim2.new(0, 30, 0, 30)
@@ -380,22 +444,14 @@ CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.TextSize = 16
 
--- Toggle Menu Visibility Handlers
-local function ToggleMenu()
-    MainFrame.Visible = not MainFrame.Visible
-end
-
+local function ToggleMenu() MainFrame.Visible = not MainFrame.Visible end
 MobileFloatingButton.MouseButton1Click:Connect(ToggleMenu)
 CloseBtn.MouseButton1Click:Connect(ToggleMenu)
-
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
-    if input.KeyCode == Enum.KeyCode.Insert then
-        ToggleMenu()
-    end
+    if input.KeyCode == Enum.KeyCode.Insert then ToggleMenu() end
 end)
 
--- Main Dynamic Scroll UI Area
 local ContentFrame = Instance.new("ScrollingFrame")
 ContentFrame.Parent = MainFrame
 ContentFrame.Size = UDim2.new(1, -16, 1, -60)
@@ -404,7 +460,7 @@ ContentFrame.BackgroundColor3 = Colors.Background
 ContentFrame.BorderSizePixel = 0
 ContentFrame.ScrollBarThickness = 4
 ContentFrame.ScrollBarImageColor3 = Colors.Accent
-ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 480)
+ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 520)
 
 local UIListLayout = Instance.new("UIListLayout")
 UIListLayout.Parent = ContentFrame
@@ -414,7 +470,6 @@ UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
 local layoutOrder = 0
 
--- UI Component: Toggle Button
 local function CreateToggle(name, tableRef, configKey)
     layoutOrder = layoutOrder + 1
     local container = Instance.new("Frame")
@@ -453,7 +508,6 @@ local function CreateToggle(name, tableRef, configKey)
     end)
 end
 
--- UI Component: Custom Slider
 local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
     layoutOrder = layoutOrder + 1
     local container = Instance.new("Frame")
@@ -533,17 +587,19 @@ end
 -- ==========================================
 -- POPULATE MENU OBJECTS
 -- ==========================================
-CreateSection("AIMBOT SYSTEM")
+CreateSection("AIMBOT SYSTEM (CAMERA)")
 CreateToggle("Enable Aimbot", Aimbot, "enabled")
 CreateToggle("Instant Lock", Aimbot, "instantLock")
 CreateToggle("Auto Fire", Aimbot, "autoFire")
-CreateToggle("Team Check (Aim)", Aimbot, "teamCheck")
 CreateToggle("Show FOV Circle", Aimbot, "showFov")
 CreateSlider("FOV Radius", Aimbot, "fov", 10, 800, false)
 CreateSlider("Smoothness", Aimbot, "smoothness", 0, 0.99, true)
 
+CreateSection("SILENT AIM (TOOL SHOOT)")
+CreateToggle("Enable Silent Aim", Aimbot, "silentAim")
+
 CreateSection("VISUAL METRICS (ESP)")
 CreateToggle("Skeleton ESP", ESP, "skeletonEnabled")
 CreateToggle("Snaplines (Tracers)", ESP, "lineEnabled")
-CreateToggle("Team Check (ESP)", ESP, "teamCheck")
+CreateToggle("Team Check", ESP, "teamCheck")
 CreateSlider("Max Distance", ESP, "maxDistance", 100, 10000, false)
