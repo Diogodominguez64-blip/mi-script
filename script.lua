@@ -1,6 +1,6 @@
 -- ==========================================
--- DZ STORE V1 - Aimbot + ESP + Silent Aim
--- Version: 3.6 (Integrated Tool Auto-Shoot)
+-- DZ STORE V1 - Neon UI Redesign
+-- Version: 4.0 (Aimbot, ESP, Silent Aim)
 -- ==========================================
 
 -- Services
@@ -10,6 +10,17 @@ local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
+-- Theme Colors (Dark & Neon Green)
+local Theme = {
+    Background = Color3.fromRGB(15, 15, 18),
+    NeonAccent = Color3.fromRGB(57, 255, 20), -- Neon Green matching the logo
+    ElementBg = Color3.fromRGB(24, 24, 28),
+    Text = Color3.fromRGB(245, 245, 245),
+    TextDark = Color3.fromRGB(10, 10, 10),
+    Inactive = Color3.fromRGB(40, 40, 48),
+    GlowTransparency = 0.6
+}
+
 -- Configurations
 local Aimbot = {
     enabled = true,
@@ -18,15 +29,14 @@ local Aimbot = {
     aimKey = Enum.UserInputType.MouseButton2,
     teamCheck = false,
     showFov = true,
-    fovColor = Color3.fromRGB(255, 50, 75),
-    fovTransparency = 0.5,
+    fovColor = Theme.NeonAccent,
+    fovTransparency = 0.8,
     bone = "Head",
     prediction = true,
     predictionAmount = 0.25,
     autoFire = false,
     instantLock = false,
     performanceMode = true,
-    -- Silent Aim Settings
     silentAim = false,
     silentAimPart = "Head"
 }
@@ -37,7 +47,7 @@ local ESP = {
     skeletonThickness = 1.5,
     skeletonColor = Color3.fromRGB(255, 255, 255),
     lineThickness = 1.5,
-    lineColor = Color3.fromRGB(255, 50, 75),
+    lineColor = Theme.NeonAccent,
     maxDistance = 3000,
     teamCheck = false
 }
@@ -58,23 +68,19 @@ fovCircle.Visible = Aimbot.showFov
 
 local function IsValidTarget(player)
     if player == LocalPlayer then return false end
-    
     local character = player.Character
     if not character or not character:FindFirstChild("Humanoid") or character.Humanoid.Health <= 0 then 
         return false 
     end
-    
     if Aimbot.teamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then 
         return false 
     end
-    
     return true
 end
 
 local function IsESPValid(player)
     if player == LocalPlayer then return false end
     if ESP.teamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then return false end
-    
     local character = player.Character
     if not character or not character:FindFirstChild("Humanoid") or character.Humanoid.Health <= 0 then
         return false
@@ -96,7 +102,6 @@ local function FindClosestEnemyByDistance()
 
     for _, player in pairs(Players:GetPlayers()) do
         if not IsValidTarget(player) then continue end
-        
         local enemyPart = player.Character:FindFirstChild(Aimbot.silentAimPart)
         if enemyPart then
             local distance = (enemyPart.Position - localRoot.Position).Magnitude
@@ -111,7 +116,6 @@ end
 
 local function ExecuteSilentAim()
     if not Aimbot.silentAim then return end
-    
     local closestEnemy = FindClosestEnemyByDistance()
     if closestEnemy and closestEnemy.Character then
         local enemyPart = closestEnemy.Character:FindFirstChild(Aimbot.silentAimPart)
@@ -119,16 +123,13 @@ local function ExecuteSilentAim()
         local rootPart = character and character:FindFirstChild("HumanoidRootPart")
         
         if enemyPart and rootPart then
-            -- Raycast para verificar línea de visión (Line of Sight)
             local raycastParams = RaycastParams.new()
             raycastParams.FilterDescendantsInstances = {character}
             raycastParams.FilterType = Enum.RaycastFilterType.Exclude
             
-            -- Dispara el rayo desde tu RootPart hacia el enemigo
             local direction = (enemyPart.Position - rootPart.Position).Unit * 500
             local raycastResult = workspace:Raycast(rootPart.Position, direction, raycastParams)
             
-            -- Si el rayo golpea al enemigo o no hay paredes bloqueando
             if raycastResult and raycastResult.Instance:IsDescendantOf(closestEnemy.Character) then
                 local tool = character:FindFirstChildOfClass("Tool")
                 if tool then
@@ -139,13 +140,10 @@ local function ExecuteSilentAim()
     end
 end
 
--- Trigger Manual por Click
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        if Aimbot.silentAim then
-            ExecuteSilentAim()
-        end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and Aimbot.silentAim then
+        ExecuteSilentAim()
     end
 end)
 
@@ -159,7 +157,6 @@ local function GetClosestPlayerToCursor()
     
     for _, player in ipairs(Players:GetPlayers()) do
         if not IsValidTarget(player) then continue end
-        
         local character = player.Character
         local targetBone = character:FindFirstChild(Aimbot.bone) or character:FindFirstChild("HumanoidRootPart")
         if not targetBone then continue end
@@ -181,7 +178,6 @@ end
 
 local function GetPredictedPosition(target)
     if not Aimbot.prediction then return target.Position end
-    
     local humanoid = target.Parent:FindFirstChild("Humanoid")
     if not humanoid then return target.Position end
     
@@ -199,7 +195,6 @@ end
 
 local function AimAt(target)
     if not target or not target.Character then return end
-    
     local targetBone = target.Character:FindFirstChild(Aimbot.bone) or target.Character:FindFirstChild("HumanoidRootPart")
     if not targetBone then return end
     
@@ -270,7 +265,6 @@ local lastTargetTime = 0
 local targetUpdateInterval = 0.016
 local currentTarget = nil
 
--- Heartbeat para el Silent Aim Constante
 RunService.Heartbeat:Connect(function()
     if Aimbot.silentAim then
         ExecuteSilentAim()
@@ -286,7 +280,6 @@ RunService.RenderStepped:Connect(function()
         local currentTime = tick()
         if not Aimbot.performanceMode or (currentTime - lastTargetTime) > targetUpdateInterval then
             lastTargetTime = currentTime
-            
             if Aimbot.instantLock then
                 currentTarget = GetClosestPlayerToCursor()
                 AimAt(currentTarget)
@@ -368,82 +361,99 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ==========================================
--- MOD MENU GUI CREATION (DZ STORE V1)
+-- MOD MENU GUI CREATION (NEON REDESIGN)
 -- ==========================================
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DZ_STORE_V1"
+ScreenGui.Name = "DZ_STORE_NEON"
 ScreenGui.Parent = game:GetService("CoreGui")
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
-local Colors = {
-    Background = Color3.fromRGB(18, 18, 22),
-    Accent = Color3.fromRGB(255, 50, 75),
-    DarkElement = Color3.fromRGB(28, 28, 34),
-    Text = Color3.fromRGB(245, 245, 245),
-    Active = Color3.fromRGB(255, 50, 75),
-    Inactive = Color3.fromRGB(45, 45, 55)
-}
-
+-- Main Drag Frame
 local MainFrame = Instance.new("Frame")
 MainFrame.Parent = ScreenGui
-MainFrame.Size = UDim2.new(0, 320, 0, 430)
-MainFrame.Position = UDim2.new(0.5, -160, 0.5, -215)
-MainFrame.BackgroundColor3 = Colors.Background
+MainFrame.Size = UDim2.new(0, 340, 0, 480)
+MainFrame.Position = UDim2.new(0.5, -170, 0.5, -240)
+MainFrame.BackgroundColor3 = Theme.Background
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 MainFrame.Visible = false
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 12)
 
+-- Neon Glow for Main Frame
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Parent = MainFrame
+MainStroke.Color = Theme.NeonAccent
+MainStroke.Thickness = 2
+MainStroke.Transparency = 0.2
+
+-- Mobile Floating Button
 local MobileFloatingButton = Instance.new("TextButton")
 MobileFloatingButton.Parent = ScreenGui
-MobileFloatingButton.Size = UDim2.new(0, 50, 0, 50)
-MobileFloatingButton.Position = UDim2.new(1, -65, 0, 25)
-MobileFloatingButton.BackgroundColor3 = Colors.Accent
+MobileFloatingButton.Size = UDim2.new(0, 56, 0, 56)
+MobileFloatingButton.Position = UDim2.new(1, -70, 0, 30)
+MobileFloatingButton.BackgroundColor3 = Theme.Background
 MobileFloatingButton.Text = "DZ"
 MobileFloatingButton.Font = Enum.Font.GothamBlack
-MobileFloatingButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-MobileFloatingButton.TextSize = 16
+MobileFloatingButton.TextColor3 = Theme.NeonAccent
+MobileFloatingButton.TextSize = 20
 MobileFloatingButton.BorderSizePixel = 0
-Instance.new("UICorner", MobileFloatingButton).CornerRadius = UDim.new(1, 0)
 MobileFloatingButton.Active = true
 MobileFloatingButton.Draggable = true
+Instance.new("UICorner", MobileFloatingButton).CornerRadius = UDim.new(1, 0)
 
-local TitleBar = Instance.new("Frame")
-TitleBar.Parent = MainFrame
-TitleBar.Size = UDim2.new(1, 0, 0, 45)
-TitleBar.BackgroundColor3 = Colors.Accent
-TitleBar.BorderSizePixel = 0
-Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 10)
-local TitleBottomCover = Instance.new("Frame")
-TitleBottomCover.Parent = TitleBar
-TitleBottomCover.Size = UDim2.new(1, 0, 0, 10)
-TitleBottomCover.Position = UDim2.new(0, 0, 1, -10)
-TitleBottomCover.BackgroundColor3 = Colors.Accent
-TitleBottomCover.BorderSizePixel = 0
+-- Floating Button Neon Stroke
+local FloatStroke = Instance.new("UIStroke")
+FloatStroke.Parent = MobileFloatingButton
+FloatStroke.Color = Theme.NeonAccent
+FloatStroke.Thickness = 2.5
+FloatStroke.Transparency = 0.1
 
-local Title = Instance.new("TextLabel")
-Title.Parent = TitleBar
-Title.Size = UDim2.new(1, -50, 1, 0)
-Title.Position = UDim2.new(0, 15, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Text = "DZ STORE V1"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 18
-Title.Font = Enum.Font.GothamBlack
-Title.TextXAlignment = Enum.TextXAlignment.Left
+-- Top Header / Logo Container
+local HeaderFrame = Instance.new("Frame")
+HeaderFrame.Parent = MainFrame
+HeaderFrame.Size = UDim2.new(1, 0, 0, 100)
+HeaderFrame.BackgroundColor3 = Theme.Background
+HeaderFrame.BorderSizePixel = 0
+Instance.new("UICorner", HeaderFrame).CornerRadius = UDim.new(0, 12)
+local HeaderBottomCover = Instance.new("Frame")
+HeaderBottomCover.Parent = HeaderFrame
+HeaderBottomCover.Size = UDim2.new(1, 0, 0, 12)
+HeaderBottomCover.Position = UDim2.new(0, 0, 1, -12)
+HeaderBottomCover.BackgroundColor3 = Theme.Background
+HeaderBottomCover.BorderSizePixel = 0
 
+-- Custom Logo Image
+local LogoImage = Instance.new("ImageLabel")
+LogoImage.Parent = HeaderFrame
+LogoImage.Size = UDim2.new(1, -40, 1, -10)
+LogoImage.Position = UDim2.new(0, 20, 0, 5)
+LogoImage.BackgroundTransparency = 1
+LogoImage.Image = "logo.png"
+LogoImage.ScaleType = Enum.ScaleType.Fit
+
+-- Separator Line under Logo
+local Separator = Instance.new("Frame")
+Separator.Parent = MainFrame
+Separator.Size = UDim2.new(1, -30, 0, 1)
+Separator.Position = UDim2.new(0, 15, 0, 100)
+Separator.BackgroundColor3 = Theme.NeonAccent
+Separator.BorderSizePixel = 0
+Separator.Transparency = 0.5
+
+-- Close Button (Top Right)
 local CloseBtn = Instance.new("TextButton")
-CloseBtn.Parent = TitleBar
+CloseBtn.Parent = MainFrame
 CloseBtn.Size = UDim2.new(0, 30, 0, 30)
-CloseBtn.Position = UDim2.new(1, -38, 0.5, -15)
+CloseBtn.Position = UDim2.new(1, -35, 0, 10)
 CloseBtn.BackgroundTransparency = 1
 CloseBtn.Text = "✕"
-CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.TextColor3 = Theme.NeonAccent
 CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.TextSize = 16
+CloseBtn.TextSize = 18
 
+-- Toggling Logic
 local function ToggleMenu() MainFrame.Visible = not MainFrame.Visible end
 MobileFloatingButton.MouseButton1Click:Connect(ToggleMenu)
 CloseBtn.MouseButton1Click:Connect(ToggleMenu)
@@ -452,59 +462,77 @@ UserInputService.InputBegan:Connect(function(input, gp)
     if input.KeyCode == Enum.KeyCode.Insert then ToggleMenu() end
 end)
 
+-- Scrolling Content Window
 local ContentFrame = Instance.new("ScrollingFrame")
 ContentFrame.Parent = MainFrame
-ContentFrame.Size = UDim2.new(1, -16, 1, -60)
-ContentFrame.Position = UDim2.new(0, 8, 0, 52)
-ContentFrame.BackgroundColor3 = Colors.Background
+ContentFrame.Size = UDim2.new(1, -20, 1, -115)
+ContentFrame.Position = UDim2.new(0, 10, 0, 105)
+ContentFrame.BackgroundColor3 = Theme.Background
+ContentFrame.BackgroundTransparency = 1
 ContentFrame.BorderSizePixel = 0
-ContentFrame.ScrollBarThickness = 4
-ContentFrame.ScrollBarImageColor3 = Colors.Accent
-ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 520)
+ContentFrame.ScrollBarThickness = 3
+ContentFrame.ScrollBarImageColor3 = Theme.NeonAccent
+ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 600)
 
 local UIListLayout = Instance.new("UIListLayout")
 UIListLayout.Parent = ContentFrame
 UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-UIListLayout.Padding = UDim.new(0, 8)
+UIListLayout.Padding = UDim.new(0, 10)
 UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
 local layoutOrder = 0
+
+-- UI Component Generators
+local function CreateSection(text)
+    layoutOrder = layoutOrder + 1
+    local label = Instance.new("TextLabel")
+    label.Parent = ContentFrame
+    label.Size = UDim2.new(1, -10, 0, 26)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Theme.NeonAccent
+    label.Font = Enum.Font.GothamBlack
+    label.TextSize = 13
+    label.LayoutOrder = layoutOrder
+    label.TextXAlignment = Enum.TextXAlignment.Left
+end
 
 local function CreateToggle(name, tableRef, configKey)
     layoutOrder = layoutOrder + 1
     local container = Instance.new("Frame")
     container.Parent = ContentFrame
-    container.Size = UDim2.new(1, 0, 0, 38)
-    container.BackgroundColor3 = Colors.DarkElement
+    container.Size = UDim2.new(1, -10, 0, 42)
+    container.BackgroundColor3 = Theme.ElementBg
     container.LayoutOrder = layoutOrder
-    Instance.new("UICorner", container).CornerRadius = UDim.new(0, 6)
+    Instance.new("UICorner", container).CornerRadius = UDim.new(0, 8)
 
     local label = Instance.new("TextLabel")
     label.Parent = container
     label.Size = UDim2.new(0.7, 0, 1, 0)
-    label.Position = UDim2.new(0, 12, 0, 0)
+    label.Position = UDim2.new(0, 15, 0, 0)
     label.BackgroundTransparency = 1
     label.Text = name
-    label.TextColor3 = Colors.Text
+    label.TextColor3 = Theme.Text
     label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Font = Enum.Font.GothamMedium
+    label.Font = Enum.Font.GothamSemibold
     label.TextSize = 13
 
     local btn = Instance.new("TextButton")
     btn.Parent = container
-    btn.Size = UDim2.new(0, 52, 0, 24)
-    btn.Position = UDim2.new(1, -64, 0.5, -12)
-    btn.BackgroundColor3 = tableRef[configKey] and Colors.Active or Colors.Inactive
+    btn.Size = UDim2.new(0, 56, 0, 26)
+    btn.Position = UDim2.new(1, -70, 0.5, -13)
+    btn.BackgroundColor3 = tableRef[configKey] and Theme.NeonAccent or Theme.Inactive
     btn.Text = tableRef[configKey] and "ON" or "OFF"
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextColor3 = tableRef[configKey] and Theme.TextDark or Theme.Text
     btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 11
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+    btn.TextSize = 12
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
 
     btn.MouseButton1Click:Connect(function()
         tableRef[configKey] = not tableRef[configKey]
-        btn.BackgroundColor3 = tableRef[configKey] and Colors.Active or Colors.Inactive
+        btn.BackgroundColor3 = tableRef[configKey] and Theme.NeonAccent or Theme.Inactive
         btn.Text = tableRef[configKey] and "ON" or "OFF"
+        btn.TextColor3 = tableRef[configKey] and Theme.TextDark or Theme.Text
     end)
 end
 
@@ -512,34 +540,41 @@ local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
     layoutOrder = layoutOrder + 1
     local container = Instance.new("Frame")
     container.Parent = ContentFrame
-    container.Size = UDim2.new(1, 0, 0, 52)
-    container.BackgroundColor3 = Colors.DarkElement
+    container.Size = UDim2.new(1, -10, 0, 56)
+    container.BackgroundColor3 = Theme.ElementBg
     container.LayoutOrder = layoutOrder
-    Instance.new("UICorner", container).CornerRadius = UDim.new(0, 6)
+    Instance.new("UICorner", container).CornerRadius = UDim.new(0, 8)
 
     local label = Instance.new("TextLabel")
     label.Parent = container
-    label.Size = UDim2.new(1, -20, 0, 22)
-    label.Position = UDim2.new(0, 12, 0, 4)
+    label.Size = UDim2.new(1, -30, 0, 22)
+    label.Position = UDim2.new(0, 15, 0, 6)
     label.BackgroundTransparency = 1
     label.Text = string.format("%s: %s", name, tostring(tableRef[configKey]))
-    label.TextColor3 = Colors.Text
+    label.TextColor3 = Theme.Text
     label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Font = Enum.Font.GothamMedium
+    label.Font = Enum.Font.GothamSemibold
     label.TextSize = 13
 
     local sliderBg = Instance.new("Frame")
     sliderBg.Parent = container
-    sliderBg.Size = UDim2.new(1, -24, 0, 6)
-    sliderBg.Position = UDim2.new(0, 12, 0, 32)
-    sliderBg.BackgroundColor3 = Colors.Inactive
+    sliderBg.Size = UDim2.new(1, -30, 0, 8)
+    sliderBg.Position = UDim2.new(0, 15, 0, 36)
+    sliderBg.BackgroundColor3 = Theme.Inactive
     Instance.new("UICorner", sliderBg).CornerRadius = UDim.new(1, 0)
 
     local fill = Instance.new("Frame")
     fill.Parent = sliderBg
     fill.Size = UDim2.new((tableRef[configKey] - min) / (max - min), 0, 1, 0)
-    fill.BackgroundColor3 = Colors.Active
+    fill.BackgroundColor3 = Theme.NeonAccent
     Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+
+    -- Glow on slider fill
+    local fillStroke = Instance.new("UIStroke")
+    fillStroke.Parent = fill
+    fillStroke.Color = Theme.NeonAccent
+    fillStroke.Thickness = 1
+    fillStroke.Transparency = 0.5
 
     local btn = Instance.new("TextButton")
     btn.Parent = sliderBg
@@ -571,23 +606,10 @@ local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
     end)
 end
 
-local function CreateSection(text)
-    layoutOrder = layoutOrder + 1
-    local label = Instance.new("TextLabel")
-    label.Parent = ContentFrame
-    label.Size = UDim2.new(1, 0, 0, 24)
-    label.BackgroundTransparency = 1
-    label.Text = text
-    label.TextColor3 = Colors.Accent
-    label.Font = Enum.Font.GothamBold
-    label.TextSize = 14
-    label.LayoutOrder = layoutOrder
-end
-
 -- ==========================================
--- POPULATE MENU OBJECTS
+-- POPULATE NEON MENU
 -- ==========================================
-CreateSection("AIMBOT SYSTEM (CAMERA)")
+CreateSection("AIMBOT SYSTEM")
 CreateToggle("Enable Aimbot", Aimbot, "enabled")
 CreateToggle("Instant Lock", Aimbot, "instantLock")
 CreateToggle("Auto Fire", Aimbot, "autoFire")
@@ -595,11 +617,11 @@ CreateToggle("Show FOV Circle", Aimbot, "showFov")
 CreateSlider("FOV Radius", Aimbot, "fov", 10, 800, false)
 CreateSlider("Smoothness", Aimbot, "smoothness", 0, 0.99, true)
 
-CreateSection("SILENT AIM (TOOL SHOOT)")
-CreateToggle("Enable Silent Aim", Aimbot, "silentAim")
+CreateSection("SILENT AIM")
+CreateToggle("Enable Silent Aim (Tools)", Aimbot, "silentAim")
 
-CreateSection("VISUAL METRICS (ESP)")
+CreateSection("VISUAL METRICS")
 CreateToggle("Skeleton ESP", ESP, "skeletonEnabled")
-CreateToggle("Snaplines (Tracers)", ESP, "lineEnabled")
+CreateToggle("Snaplines", ESP, "lineEnabled")
 CreateToggle("Team Check", ESP, "teamCheck")
 CreateSlider("Max Distance", ESP, "maxDistance", 100, 10000, false)
