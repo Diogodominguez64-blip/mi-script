@@ -1,5 +1,7 @@
--- Enhanced Aimbot with Mod Menu
--- Version: 2.1 - Added FOV and Smoothness Editable (Fully Completed)
+-- ==========================================
+-- DZ STORE V1 - Enhanced Aimbot & ESP
+-- Version: 3.0 (Mobile Supported & Modern UI)
+-- ==========================================
 
 -- Services
 local Players = game:GetService("Players")
@@ -7,21 +9,18 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
-local Mouse = LocalPlayer:GetMouse()
 
--- Aimbot Configuration
+-- Configurations
 local Aimbot = {
     enabled = true,
-    silentAim = false,
     fov = 150,
     smoothness = 0.3,
     aimKey = Enum.UserInputType.MouseButton2,
     teamCheck = false,
     showFov = true,
-    fovColor = Color3.fromRGB(255, 0, 0),
-    fovTransparency = 0.3,
+    fovColor = Color3.fromRGB(255, 50, 75),
+    fovTransparency = 0.5,
     bone = "Head",
-    maxDistance = 10000,
     prediction = true,
     predictionAmount = 0.25,
     autoFire = false,
@@ -29,10 +28,20 @@ local Aimbot = {
     performanceMode = true
 }
 
--- FOV Circle Drawing
+local ESP = {
+    skeletonEnabled = false,
+    lineEnabled = false,
+    skeletonThickness = 1.5,
+    skeletonColor = Color3.fromRGB(255, 255, 255),
+    lineThickness = 1.5,
+    lineColor = Color3.fromRGB(255, 50, 75),
+    maxDistance = 2000
+}
+
+-- FOV Circle
 local fovCircle = Drawing.new("Circle")
 fovCircle.Color = Aimbot.fovColor
-fovCircle.Thickness = 1
+fovCircle.Thickness = 1.5
 fovCircle.NumSides = 64
 fovCircle.Radius = Aimbot.fov
 fovCircle.Filled = false
@@ -40,10 +49,9 @@ fovCircle.Transparency = Aimbot.fovTransparency
 fovCircle.Visible = Aimbot.showFov
 
 -- ==========================================
--- AIMBOT LOGIC
+-- CORE LOGIC (AIMBOT & ESP)
 -- ==========================================
 
--- Function to check if a player is a valid target
 local function IsValidTarget(player)
     if player == LocalPlayer then return false end
     
@@ -52,12 +60,13 @@ local function IsValidTarget(player)
         return false 
     end
     
-    if Aimbot.teamCheck and player.Team == LocalPlayer.Team then return false end
+    if Aimbot.teamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then 
+        return false 
+    end
     
     return true
 end
 
--- Function to get the closest player to the cursor
 local function GetClosestPlayerToCursor()
     local closestPlayer = nil
     local shortestDistance = Aimbot.fov
@@ -85,7 +94,6 @@ local function GetClosestPlayerToCursor()
     return closestPlayer
 end
 
--- Enhanced prediction function
 local function GetPredictedPosition(target)
     if not Aimbot.prediction then return target.Position end
     
@@ -97,23 +105,17 @@ local function GetPredictedPosition(target)
         velocity = velocity + humanoid.BodyVelocity.Velocity
     end
     
-    local distance = (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")) 
-        and (LocalPlayer.Character.HumanoidRootPart.Position - target.Position).Magnitude 
-        or (Camera.CFrame.Position - target.Position).Magnitude
-        
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local distance = root and (root.Position - target.Position).Magnitude or (Camera.CFrame.Position - target.Position).Magnitude
     local timeToReach = distance / 2000
     
     return target.Position + (velocity * timeToReach * Aimbot.predictionAmount)
 end
 
--- Enhanced aim function
 local function AimAt(target)
-    if not target then return end
+    if not target or not target.Character then return end
     
-    local character = target.Character
-    if not character then return end
-    
-    local targetBone = character:FindFirstChild(Aimbot.bone) or character:FindFirstChild("HumanoidRootPart")
+    local targetBone = target.Character:FindFirstChild(Aimbot.bone) or target.Character:FindFirstChild("HumanoidRootPart")
     if not targetBone then return end
     
     local targetPosition = GetPredictedPosition(targetBone)
@@ -127,121 +129,257 @@ local function AimAt(target)
         Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + newLook)
     end
     
-    if Aimbot.autoFire and UserInputService:IsMouseButtonPressed(Aimbot.aimKey) then
-        if mouse1press then
-            mouse1press()
-            task.wait(0.1)
-            mouse1release()
-        end
+    if Aimbot.autoFire and UserInputService:IsMouseButtonPressed(Aimbot.aimKey) and mouse1press then
+        mouse1press()
+        task.wait(0.05)
+        mouse1release()
     end
 end
 
--- Optimized main update function
+-- ESP Drawings Manager
+local ESP_Drawings = {}
+
+local function createDrawings(player)
+    local drawings = { Line = Drawing.new("Line"), Skeleton = {} }
+    local bones = {
+        {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+        {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
+        {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
+        {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"},
+        {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"}
+    }
+    
+    for i = 1, #bones do
+        local line = Drawing.new("Line")
+        line.Thickness = ESP.skeletonThickness
+        line.Color = ESP.skeletonColor
+        line.Transparency = 1
+        drawings.Skeleton[i] = {line = line, parts = bones[i]}
+    end
+    
+    drawings.Line.Thickness = ESP.lineThickness
+    drawings.Line.Color = ESP.lineColor
+    ESP_Drawings[player] = drawings
+end
+
+Players.PlayerRemoving:Connect(function(player)
+    if ESP_Drawings[player] then
+        ESP_Drawings[player].Line:Remove()
+        for _, obj in pairs(ESP_Drawings[player].Skeleton) do obj.line:Remove() end
+        ESP_Drawings[player] = nil
+    end
+end)
+
+-- Main Loop
 local lastTargetTime = 0
 local targetUpdateInterval = 0.016
 local currentTarget = nil
 
-local function OnRender()
-    -- Update FOV circle
+RunService.RenderStepped:Connect(function()
+    -- 1. FOV Update
     fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     fovCircle.Radius = Aimbot.fov
     fovCircle.Visible = Aimbot.enabled and Aimbot.showFov
 
-    if not Aimbot.enabled then return end
-    
-    local currentTime = tick()
-    if not Aimbot.performanceMode or (currentTime - lastTargetTime) > targetUpdateInterval then
-        lastTargetTime = currentTime
-        
-        if Aimbot.instantLock then
-            local target = GetClosestPlayerToCursor()
-            if target then
-                currentTarget = target
-                AimAt(target)
+    -- 2. Aimbot Loop
+    if Aimbot.enabled then
+        local currentTime = tick()
+        if not Aimbot.performanceMode or (currentTime - lastTargetTime) > targetUpdateInterval then
+            lastTargetTime = currentTime
+            
+            if Aimbot.instantLock then
+                currentTarget = GetClosestPlayerToCursor()
+                AimAt(currentTarget)
             else
-                currentTarget = nil
-            end
-        else
-            if UserInputService:IsMouseButtonPressed(Aimbot.aimKey) then
-                local target = GetClosestPlayerToCursor()
-                if target then
-                    currentTarget = target
-                    AimAt(target)
+                if UserInputService:IsMouseButtonPressed(Aimbot.aimKey) then
+                    currentTarget = GetClosestPlayerToCursor()
+                    AimAt(currentTarget)
                 else
                     currentTarget = nil
                 end
+            end
+        else
+            if currentTarget and IsValidTarget(currentTarget) then
+                AimAt(currentTarget)
             else
                 currentTarget = nil
             end
         end
-    else
-        if currentTarget and IsValidTarget(currentTarget) then
-            AimAt(currentTarget)
+    end
+
+    -- 3. ESP Loop
+    for _, player in pairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        
+        if not ESP_Drawings[player] then createDrawings(player) end
+        
+        local drawings = ESP_Drawings[player]
+        local isEnemy = IsValidTarget(player) 
+        local character = player.Character
+        local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+        
+        local shouldDraw = isEnemy and (ESP.skeletonEnabled or ESP.lineEnabled)
+        
+        if shouldDraw and rootPart then
+            local rootPos, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+            local distance = (Camera.CFrame.Position - rootPart.Position).Magnitude
+            
+            if onScreen and distance < ESP.maxDistance then
+                -- Tracers
+                if ESP.lineEnabled then
+                    drawings.Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                    drawings.Line.To = Vector2.new(rootPos.X, rootPos.Y)
+                    drawings.Line.Visible = true
+                else
+                    drawings.Line.Visible = false
+                end
+                
+                -- Skeleton
+                if ESP.skeletonEnabled then
+                    for _, boneData in pairs(drawings.Skeleton) do
+                        local part1 = character:FindFirstChild(boneData.parts[1]) or character:FindFirstChild("Torso")
+                        local part2 = character:FindFirstChild(boneData.parts[2]) or character:FindFirstChild("Torso")
+                        
+                        if part1 and part2 then
+                            local pos1, vis1 = Camera:WorldToViewportPoint(part1.Position)
+                            local pos2, vis2 = Camera:WorldToViewportPoint(part2.Position)
+                            
+                            if vis1 or vis2 then
+                                boneData.line.From = Vector2.new(pos1.X, pos1.Y)
+                                boneData.line.To = Vector2.new(pos2.X, pos2.Y)
+                                boneData.line.Visible = true
+                            else
+                                boneData.line.Visible = false
+                            end
+                        else
+                            boneData.line.Visible = false
+                        end
+                    end
+                else
+                    for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
+                end
+            else
+                drawings.Line.Visible = false
+                for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
+            end
         else
-            currentTarget = nil
+            drawings.Line.Visible = false
+            for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
         end
     end
-end
-
-RunService.RenderStepped:Connect(OnRender)
+end)
 
 -- ==========================================
--- MOD MENU GUI
+-- MOD MENU GUI (DZ STORE V1)
 -- ==========================================
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "EnhancedAimbotGUI"
+ScreenGui.Name = "DZ_STORE_V1"
 ScreenGui.Parent = game:GetService("CoreGui")
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
+-- Color Palette
+local Colors = {
+    Background = Color3.fromRGB(20, 20, 25),
+    Accent = Color3.fromRGB(255, 50, 75),
+    DarkElement = Color3.fromRGB(30, 30, 35),
+    Text = Color3.fromRGB(240, 240, 240),
+    Active = Color3.fromRGB(255, 50, 75),
+    Inactive = Color3.fromRGB(50, 50, 60)
+}
+
+-- Mobile Open Button (Floating)
+local OpenButton = Instance.new("TextButton")
+OpenButton.Parent = ScreenGui
+OpenButton.Size = UDim2.new(0, 45, 0, 45)
+OpenButton.Position = UDim2.new(1, -60, 0, 20)
+OpenButton.BackgroundColor3 = Colors.Accent
+OpenButton.Text = "DZ"
+OpenButton.Font = Enum.Font.GothamBold
+OpenButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+OpenButton.TextSize = 18
+OpenButton.BorderSizePixel = 0
+Instance.new("UICorner", OpenButton).CornerRadius = UDim.new(1, 0)
+OpenButton.Active = true
+OpenButton.Draggable = true -- Allows mobile users to move the floating button
+
+-- Main Frame
 local MainFrame = Instance.new("Frame")
 MainFrame.Parent = ScreenGui
-MainFrame.Size = UDim2.new(0, 300, 0, 420)
-MainFrame.Position = UDim2.new(0.5, -150, 0.5, -210)
-MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.Size = UDim2.new(0, 320, 0, 450)
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -225)
+MainFrame.BackgroundColor3 = Colors.Background
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
-MainFrame.Draggable = true -- Habilita arrastrar el menú desde la barra superior
+MainFrame.Draggable = true
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+MainFrame.Visible = false -- Starts hidden
 
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 8)
-UICorner.Parent = MainFrame
-
+-- Title Bar
 local TitleBar = Instance.new("Frame")
 TitleBar.Parent = MainFrame
-TitleBar.Size = UDim2.new(1, 0, 0, 30)
-TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+TitleBar.Size = UDim2.new(1, 0, 0, 40)
+TitleBar.BackgroundColor3 = Colors.Accent
 TitleBar.BorderSizePixel = 0
 local TitleCorner = Instance.new("UICorner")
-TitleCorner.CornerRadius = UDim.new(0, 8)
+TitleCorner.CornerRadius = UDim.new(0, 10)
 TitleCorner.Parent = TitleBar
-
--- Fix bottom corners of TitleBar to blend with MainFrame
 local TitleBottomCover = Instance.new("Frame")
 TitleBottomCover.Parent = TitleBar
-TitleBottomCover.Size = UDim2.new(1, 0, 0, 8)
-TitleBottomCover.Position = UDim2.new(0, 0, 1, -8)
-TitleBottomCover.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+TitleBottomCover.Size = UDim2.new(1, 0, 0, 10)
+TitleBottomCover.Position = UDim2.new(0, 0, 1, -10)
+TitleBottomCover.BackgroundColor3 = Colors.Accent
 TitleBottomCover.BorderSizePixel = 0
 
 local Title = Instance.new("TextLabel")
 Title.Parent = TitleBar
-Title.Size = UDim2.new(1, 0, 1, 0)
+Title.Size = UDim2.new(1, -40, 1, 0)
+Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "Enhanced Aimbot v2.1"
+Title.Text = "DZ STORE V1"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 14
-Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 18
+Title.Font = Enum.Font.GothamBlack
+Title.TextXAlignment = Enum.TextXAlignment.Left
 
+-- Close Button (Inside Menu)
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Parent = TitleBar
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0.5, -15)
+CloseBtn.BackgroundTransparency = 1
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 16
+
+-- Toggle Menu Logic
+OpenButton.MouseButton1Click:Connect(function()
+    MainFrame.Visible = true
+    OpenButton.Visible = false
+end)
+CloseBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+    OpenButton.Visible = true
+end)
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.Insert then
+        MainFrame.Visible = not MainFrame.Visible
+        OpenButton.Visible = not MainFrame.Visible
+    end
+end)
+
+-- Scrolling Content
 local ContentFrame = Instance.new("ScrollingFrame")
 ContentFrame.Parent = MainFrame
-ContentFrame.Size = UDim2.new(1, -10, 1, -40)
-ContentFrame.Position = UDim2.new(0, 5, 0, 35)
-ContentFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ContentFrame.Size = UDim2.new(1, -16, 1, -50)
+ContentFrame.Position = UDim2.new(0, 8, 0, 45)
+ContentFrame.BackgroundColor3 = Colors.Background
 ContentFrame.BorderSizePixel = 0
 ContentFrame.ScrollBarThickness = 4
-ContentFrame.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
-ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 350) -- Altura ajustable según contenido
+ContentFrame.ScrollBarImageColor3 = Colors.Accent
+ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 420)
 
 local UIListLayout = Instance.new("UIListLayout")
 UIListLayout.Parent = ContentFrame
@@ -249,70 +387,79 @@ UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 UIListLayout.Padding = UDim.new(0, 8)
 UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
--- Helpers para crear UI
 local layoutOrder = 0
 
-local function CreateToggle(name, configKey)
+-- Custom Toggle Component
+local function CreateToggle(name, tableRef, configKey)
     layoutOrder = layoutOrder + 1
     local container = Instance.new("Frame")
     container.Parent = ContentFrame
-    container.Size = UDim2.new(1, -10, 0, 30)
-    container.BackgroundTransparency = 1
+    container.Size = UDim2.new(1, 0, 0, 35)
+    container.BackgroundColor3 = Colors.DarkElement
     container.LayoutOrder = layoutOrder
+    Instance.new("UICorner", container).CornerRadius = UDim.new(0, 6)
 
     local label = Instance.new("TextLabel")
     label.Parent = container
     label.Size = UDim2.new(0.7, 0, 1, 0)
+    label.Position = UDim2.new(0, 10, 0, 0)
     label.BackgroundTransparency = 1
-    label.Text = " " .. name
-    label.TextColor3 = Color3.fromRGB(200, 200, 200)
+    label.Text = name
+    label.TextColor3 = Colors.Text
     label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Font = Enum.Font.SourceSans
+    label.Font = Enum.Font.GothamMedium
+    label.TextSize = 13
 
     local btn = Instance.new("TextButton")
     btn.Parent = container
-    btn.Size = UDim2.new(0, 40, 0, 20)
-    btn.Position = UDim2.new(1, -45, 0.5, -10)
-    btn.BackgroundColor3 = Aimbot[configKey] and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
-    btn.Text = Aimbot[configKey] and "ON" or "OFF"
+    btn.Size = UDim2.new(0, 50, 0, 22)
+    btn.Position = UDim2.new(1, -60, 0.5, -11)
+    btn.BackgroundColor3 = tableRef[configKey] and Colors.Active or Colors.Inactive
+    btn.Text = tableRef[configKey] and "ON" or "OFF"
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.SourceSansBold
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 12
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
 
     btn.MouseButton1Click:Connect(function()
-        Aimbot[configKey] = not Aimbot[configKey]
-        btn.BackgroundColor3 = Aimbot[configKey] and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
-        btn.Text = Aimbot[configKey] and "ON" or "OFF"
+        tableRef[configKey] = not tableRef[configKey]
+        btn.BackgroundColor3 = tableRef[configKey] and Colors.Active or Colors.Inactive
+        btn.Text = tableRef[configKey] and "ON" or "OFF"
     end)
 end
 
-local function CreateSlider(name, configKey, min, max, isDecimal)
+-- Custom Slider Component
+local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
     layoutOrder = layoutOrder + 1
     local container = Instance.new("Frame")
     container.Parent = ContentFrame
-    container.Size = UDim2.new(1, -10, 0, 45)
-    container.BackgroundTransparency = 1
+    container.Size = UDim2.new(1, 0, 0, 50)
+    container.BackgroundColor3 = Colors.DarkElement
     container.LayoutOrder = layoutOrder
+    Instance.new("UICorner", container).CornerRadius = UDim.new(0, 6)
 
     local label = Instance.new("TextLabel")
     label.Parent = container
-    label.Size = UDim2.new(1, 0, 0, 20)
+    label.Size = UDim2.new(1, -20, 0, 20)
+    label.Position = UDim2.new(0, 10, 0, 5)
     label.BackgroundTransparency = 1
-    label.Text = string.format("%s: %s", name, tostring(Aimbot[configKey]))
-    label.TextColor3 = Color3.fromRGB(200, 200, 200)
-    label.Font = Enum.Font.SourceSans
+    label.Text = string.format("%s: %s", name, tostring(tableRef[configKey]))
+    label.TextColor3 = Colors.Text
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Font = Enum.Font.GothamMedium
+    label.TextSize = 13
 
     local sliderBg = Instance.new("Frame")
     sliderBg.Parent = container
     sliderBg.Size = UDim2.new(1, -20, 0, 6)
-    sliderBg.Position = UDim2.new(0, 10, 0, 25)
-    sliderBg.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    sliderBg.Position = UDim2.new(0, 10, 0, 30)
+    sliderBg.BackgroundColor3 = Colors.Inactive
     Instance.new("UICorner", sliderBg).CornerRadius = UDim.new(1, 0)
 
     local fill = Instance.new("Frame")
     fill.Parent = sliderBg
-    fill.Size = UDim2.new((Aimbot[configKey] - min) / (max - min), 0, 1, 0)
-    fill.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+    fill.Size = UDim2.new((tableRef[configKey] - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Colors.Active
     Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
 
     local btn = Instance.new("TextButton")
@@ -324,14 +471,18 @@ local function CreateSlider(name, configKey, min, max, isDecimal)
 
     local isSliding = false
     btn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then isSliding = true end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then 
+            isSliding = true 
+        end
     end)
-    btn.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then isSliding = false end
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then 
+            isSliding = false 
+        end
     end)
 
     UserInputService.InputChanged:Connect(function(input)
-        if isSliding and input.UserInputType == Enum.UserInputType.MouseMovement then
+        if isSliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local relativeX = math.clamp(input.Position.X - sliderBg.AbsolutePosition.X, 0, sliderBg.AbsoluteSize.X)
             local percentage = relativeX / sliderBg.AbsoluteSize.X
             fill.Size = UDim2.new(percentage, 0, 1, 0)
@@ -339,27 +490,42 @@ local function CreateSlider(name, configKey, min, max, isDecimal)
             local value = min + ((max - min) * percentage)
             if not isDecimal then value = math.floor(value) else value = math.floor(value * 100) / 100 end
             
-            Aimbot[configKey] = value
+            tableRef[configKey] = value
             label.Text = string.format("%s: %s", name, tostring(value))
+            
+            -- If FOV, visually update color immediately
+            if configKey == "fov" then fovCircle.Radius = value end
         end
     end)
 end
 
--- Popular el Menú
-CreateToggle("Enable Aimbot", "enabled")
-CreateToggle("Show FOV Circle", "showFov")
-CreateToggle("Team Check", "teamCheck")
-CreateToggle("Instant Lock", "instantLock")
-CreateToggle("Auto Fire", "autoFire")
-CreateToggle("Performance Mode", "performanceMode")
+local function CreateSection(text)
+    layoutOrder = layoutOrder + 1
+    local label = Instance.new("TextLabel")
+    label.Parent = ContentFrame
+    label.Size = UDim2.new(1, 0, 0, 20)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Colors.Accent
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 14
+    label.LayoutOrder = layoutOrder
+end
 
-CreateSlider("FOV Radius", "fov", 10, 800, false)
-CreateSlider("Smoothness", "smoothness", 0, 0.99, true)
+-- ==========================================
+-- POPULATE MENU
+-- ==========================================
+CreateSection("AIMBOT")
+CreateToggle("Enable Aimbot", Aimbot, "enabled")
+CreateToggle("Instant Lock", Aimbot, "instantLock")
+CreateToggle("Auto Fire", Aimbot, "autoFire")
+CreateToggle("Team Check", Aimbot, "teamCheck")
+CreateToggle("Show FOV Circle", Aimbot, "showFov")
 
--- Toggle Menu Visibility with Insert Key
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.Insert then
-        MainFrame.Visible = not MainFrame.Visible
-    end
-end)
+CreateSection("AIMBOT SETTINGS")
+CreateSlider("FOV Radius", Aimbot, "fov", 10, 800, false)
+CreateSlider("Smoothness", Aimbot, "smoothness", 0, 0.99, true)
+
+CreateSection("ESP")
+CreateToggle("Skeleton ESP", ESP, "skeletonEnabled")
+CreateToggle("Line Tracers ESP", ESP, "lineEnabled")
