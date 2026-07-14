@@ -1,6 +1,6 @@
 -- ==========================================
--- DZ STORE V1 - Neon UI Redesign
--- Version: 4.0 (Aimbot, ESP, Silent Aim)
+-- DZ STORE V2 - Neon UI Redesign
+-- Version: 5.0 (Aimbot, Name ESP, Silent Aim, Wall Check)
 -- ==========================================
 
 -- Services
@@ -13,12 +13,11 @@ local LocalPlayer = Players.LocalPlayer
 -- Theme Colors (Dark & Neon Green)
 local Theme = {
     Background = Color3.fromRGB(15, 15, 18),
-    NeonAccent = Color3.fromRGB(57, 255, 20), -- Neon Green matching the logo
+    NeonAccent = Color3.fromRGB(57, 255, 20),
     ElementBg = Color3.fromRGB(24, 24, 28),
     Text = Color3.fromRGB(245, 245, 245),
     TextDark = Color3.fromRGB(10, 10, 10),
-    Inactive = Color3.fromRGB(40, 40, 48),
-    GlowTransparency = 0.6
+    Inactive = Color3.fromRGB(40, 40, 48)
 }
 
 -- Configurations
@@ -28,6 +27,7 @@ local Aimbot = {
     smoothness = 0.3,
     aimKey = Enum.UserInputType.MouseButton2,
     teamCheck = false,
+    wallCheck = false, -- Nuevo Wall Check integrado
     showFov = true,
     fovColor = Theme.NeonAccent,
     fovTransparency = 0.8,
@@ -42,6 +42,7 @@ local Aimbot = {
 }
 
 local ESP = {
+    nameEnabled = true, -- Nuevo Name ESP
     skeletonEnabled = true,
     lineEnabled = true,
     skeletonThickness = 1.5,
@@ -63,8 +64,30 @@ fovCircle.Transparency = Aimbot.fovTransparency
 fovCircle.Visible = Aimbot.showFov
 
 -- ==========================================
--- CORE VALIDATION FUNCTIONS
+-- CORE VALIDATION & WALL CHECK
 -- ==========================================
+
+local function IsBehindWall(targetPart)
+    if not Aimbot.wallCheck then return false end
+    
+    local character = LocalPlayer.Character
+    local origin = Camera.CFrame.Position
+    
+    if character and targetPart then
+        local raycastParams = RaycastParams.new()
+        raycastParams.FilterDescendantsInstances = {character}
+        raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+        
+        local direction = (targetPart.Position - origin)
+        local raycastResult = workspace:Raycast(origin, direction, raycastParams)
+        
+        -- Si el rayo golpea algo que NO es parte del enemigo, hay una pared
+        if raycastResult and not raycastResult.Instance:IsDescendantOf(targetPart.Parent) then
+            return true
+        end
+    end
+    return false
+end
 
 local function IsValidTarget(player)
     if player == LocalPlayer then return false end
@@ -74,6 +97,10 @@ local function IsValidTarget(player)
     end
     if Aimbot.teamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then 
         return false 
+    end
+    local targetBone = character:FindFirstChild(Aimbot.bone) or character:FindFirstChild("HumanoidRootPart")
+    if targetBone and IsBehindWall(targetBone) then
+        return false
     end
     return true
 end
@@ -103,6 +130,7 @@ local function FindClosestEnemyByDistance()
     for _, player in pairs(Players:GetPlayers()) do
         if not IsValidTarget(player) then continue end
         local enemyPart = player.Character:FindFirstChild(Aimbot.silentAimPart)
+        
         if enemyPart then
             local distance = (enemyPart.Position - localRoot.Position).Magnitude
             if distance < closestDistance then
@@ -117,24 +145,16 @@ end
 local function ExecuteSilentAim()
     if not Aimbot.silentAim then return end
     local closestEnemy = FindClosestEnemyByDistance()
+    
     if closestEnemy and closestEnemy.Character then
         local enemyPart = closestEnemy.Character:FindFirstChild(Aimbot.silentAimPart)
         local character = LocalPlayer.Character
         local rootPart = character and character:FindFirstChild("HumanoidRootPart")
         
         if enemyPart and rootPart then
-            local raycastParams = RaycastParams.new()
-            raycastParams.FilterDescendantsInstances = {character}
-            raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-            
-            local direction = (enemyPart.Position - rootPart.Position).Unit * 500
-            local raycastResult = workspace:Raycast(rootPart.Position, direction, raycastParams)
-            
-            if raycastResult and raycastResult.Instance:IsDescendantOf(closestEnemy.Character) then
-                local tool = character:FindFirstChildOfClass("Tool")
-                if tool then
-                    tool:Activate()
-                end
+            local tool = character:FindFirstChildOfClass("Tool")
+            if tool then
+                tool:Activate()
             end
         end
     end
@@ -217,13 +237,13 @@ local function AimAt(target)
 end
 
 -- ==========================================
--- STABLE SKELETON & LINE ESP LOGIC
+-- STABLE ESP LOGIC (NAME + SKELETON + LINE)
 -- ==========================================
 
 local ESP_Drawings = {}
 
 local function createDrawings(player)
-    local drawings = { Line = Drawing.new("Line"), Skeleton = {} }
+    local drawings = { Line = Drawing.new("Line"), Name = Drawing.new("Text"), Skeleton = {} }
     local bones = {
         {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
         {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"},
@@ -244,12 +264,19 @@ local function createDrawings(player)
     drawings.Line.Color = ESP.lineColor
     drawings.Line.Transparency = 1
     
+    drawings.Name.Size = 18
+    drawings.Name.Color = ESP.lineColor
+    drawings.Name.Outline = true
+    drawings.Name.OutlineColor = Color3.new(0, 0, 0)
+    drawings.Name.Center = true
+    
     ESP_Drawings[player] = drawings
 end
 
 local function ClearPlayerESP(player)
     if ESP_Drawings[player] then
         ESP_Drawings[player].Line:Remove()
+        ESP_Drawings[player].Name:Remove()
         for _, obj in pairs(ESP_Drawings[player].Skeleton) do obj.line:Remove() end
         ESP_Drawings[player] = nil
     end
@@ -311,13 +338,17 @@ RunService.RenderStepped:Connect(function()
         local drawings = ESP_Drawings[player]
         local character = player.Character
         local rootPart = character:FindFirstChild("HumanoidRootPart")
+        local headPart = character:FindFirstChild("Head")
         
-        if rootPart then
+        if rootPart and headPart then
             local rootPos, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+            local headPos = Camera:WorldToViewportPoint(headPart.Position + Vector3.new(0, 1.5, 0))
+            
             local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             local distance = localRoot and (localRoot.Position - rootPart.Position).Magnitude or (Camera.CFrame.Position - rootPart.Position).Magnitude
             
             if onScreen and distance < ESP.maxDistance then
+                -- Tracers
                 if ESP.lineEnabled then
                     drawings.Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
                     drawings.Line.To = Vector2.new(rootPos.X, rootPos.Y)
@@ -326,6 +357,16 @@ RunService.RenderStepped:Connect(function()
                     drawings.Line.Visible = false
                 end
                 
+                -- Name ESP
+                if ESP.nameEnabled then
+                    drawings.Name.Text = string.format("[%s] [%dm]", player.Name, math.floor(distance))
+                    drawings.Name.Position = Vector2.new(headPos.X, headPos.Y - 20)
+                    drawings.Name.Visible = true
+                else
+                    drawings.Name.Visible = false
+                end
+                
+                -- Skeleton ESP
                 if ESP.skeletonEnabled then
                     for _, boneData in pairs(drawings.Skeleton) do
                         local part1 = character:FindFirstChild(boneData.parts[1]) or character:FindFirstChild("Torso")
@@ -351,25 +392,26 @@ RunService.RenderStepped:Connect(function()
                 end
             else
                 drawings.Line.Visible = false
+                drawings.Name.Visible = false
                 for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
             end
         else
             drawings.Line.Visible = false
+            drawings.Name.Visible = false
             for _, boneData in pairs(drawings.Skeleton) do boneData.line.Visible = false end
         end
     end
 end)
 
 -- ==========================================
--- MOD MENU GUI CREATION (NEON REDESIGN)
+-- MOD MENU GUI CREATION (DZ STORE V2)
 -- ==========================================
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DZ_STORE_NEON"
+ScreenGui.Name = "DZ_STORE_V2"
 ScreenGui.Parent = game:GetService("CoreGui")
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- Main Drag Frame
 local MainFrame = Instance.new("Frame")
 MainFrame.Parent = ScreenGui
 MainFrame.Size = UDim2.new(0, 340, 0, 480)
@@ -381,14 +423,12 @@ MainFrame.Draggable = true
 MainFrame.Visible = false
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 12)
 
--- Neon Glow for Main Frame
 local MainStroke = Instance.new("UIStroke")
 MainStroke.Parent = MainFrame
 MainStroke.Color = Theme.NeonAccent
 MainStroke.Thickness = 2
 MainStroke.Transparency = 0.2
 
--- Mobile Floating Button
 local MobileFloatingButton = Instance.new("TextButton")
 MobileFloatingButton.Parent = ScreenGui
 MobileFloatingButton.Size = UDim2.new(0, 56, 0, 56)
@@ -403,28 +443,30 @@ MobileFloatingButton.Active = true
 MobileFloatingButton.Draggable = true
 Instance.new("UICorner", MobileFloatingButton).CornerRadius = UDim.new(1, 0)
 
--- Floating Button Neon Stroke
 local FloatStroke = Instance.new("UIStroke")
 FloatStroke.Parent = MobileFloatingButton
 FloatStroke.Color = Theme.NeonAccent
 FloatStroke.Thickness = 2.5
 FloatStroke.Transparency = 0.1
 
--- Top Header / Logo Container
 local HeaderFrame = Instance.new("Frame")
 HeaderFrame.Parent = MainFrame
 HeaderFrame.Size = UDim2.new(1, 0, 0, 100)
 HeaderFrame.BackgroundColor3 = Theme.Background
 HeaderFrame.BorderSizePixel = 0
 Instance.new("UICorner", HeaderFrame).CornerRadius = UDim.new(0, 12)
-local HeaderBottomCover = Instance.new("Frame")
-HeaderBottomCover.Parent = HeaderFrame
-HeaderBottomCover.Size = UDim2.new(1, 0, 0, 12)
-HeaderBottomCover.Position = UDim2.new(0, 0, 1, -12)
-HeaderBottomCover.BackgroundColor3 = Theme.Background
-HeaderBottomCover.BorderSizePixel = 0
 
--- Custom Logo Image
+-- Title Fallback (if logo image fails to load)
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Parent = HeaderFrame
+TitleLabel.Size = UDim2.new(1, 0, 1, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Text = "DZ STORE V2"
+TitleLabel.TextColor3 = Theme.Text
+TitleLabel.Font = Enum.Font.GothamBlack
+TitleLabel.TextSize = 24
+TitleLabel.Visible = false -- Oculto por defecto, se muestra la imagen en su lugar
+
 local LogoImage = Instance.new("ImageLabel")
 LogoImage.Parent = HeaderFrame
 LogoImage.Size = UDim2.new(1, -40, 1, -10)
@@ -433,7 +475,6 @@ LogoImage.BackgroundTransparency = 1
 LogoImage.Image = "logo.png"
 LogoImage.ScaleType = Enum.ScaleType.Fit
 
--- Separator Line under Logo
 local Separator = Instance.new("Frame")
 Separator.Parent = MainFrame
 Separator.Size = UDim2.new(1, -30, 0, 1)
@@ -442,7 +483,6 @@ Separator.BackgroundColor3 = Theme.NeonAccent
 Separator.BorderSizePixel = 0
 Separator.Transparency = 0.5
 
--- Close Button (Top Right)
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Parent = MainFrame
 CloseBtn.Size = UDim2.new(0, 30, 0, 30)
@@ -453,7 +493,6 @@ CloseBtn.TextColor3 = Theme.NeonAccent
 CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.TextSize = 18
 
--- Toggling Logic
 local function ToggleMenu() MainFrame.Visible = not MainFrame.Visible end
 MobileFloatingButton.MouseButton1Click:Connect(ToggleMenu)
 CloseBtn.MouseButton1Click:Connect(ToggleMenu)
@@ -462,7 +501,6 @@ UserInputService.InputBegan:Connect(function(input, gp)
     if input.KeyCode == Enum.KeyCode.Insert then ToggleMenu() end
 end)
 
--- Scrolling Content Window
 local ContentFrame = Instance.new("ScrollingFrame")
 ContentFrame.Parent = MainFrame
 ContentFrame.Size = UDim2.new(1, -20, 1, -115)
@@ -472,7 +510,7 @@ ContentFrame.BackgroundTransparency = 1
 ContentFrame.BorderSizePixel = 0
 ContentFrame.ScrollBarThickness = 3
 ContentFrame.ScrollBarImageColor3 = Theme.NeonAccent
-ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 600)
+ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 750)
 
 local UIListLayout = Instance.new("UIListLayout")
 UIListLayout.Parent = ContentFrame
@@ -482,7 +520,6 @@ UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
 local layoutOrder = 0
 
--- UI Component Generators
 local function CreateSection(text)
     layoutOrder = layoutOrder + 1
     local label = Instance.new("TextLabel")
@@ -569,13 +606,6 @@ local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
     fill.BackgroundColor3 = Theme.NeonAccent
     Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
 
-    -- Glow on slider fill
-    local fillStroke = Instance.new("UIStroke")
-    fillStroke.Parent = fill
-    fillStroke.Color = Theme.NeonAccent
-    fillStroke.Thickness = 1
-    fillStroke.Transparency = 0.5
-
     local btn = Instance.new("TextButton")
     btn.Parent = sliderBg
     btn.Size = UDim2.new(1, 0, 1, 20)
@@ -596,10 +626,8 @@ local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
             local relativeX = math.clamp(input.Position.X - sliderBg.AbsolutePosition.X, 0, sliderBg.AbsoluteSize.X)
             local percentage = relativeX / sliderBg.AbsoluteSize.X
             fill.Size = UDim2.new(percentage, 0, 1, 0)
-            
             local value = min + ((max - min) * percentage)
             if not isDecimal then value = math.floor(value) else value = math.floor(value * 100) / 100 end
-            
             tableRef[configKey] = value
             label.Text = string.format("%s: %s", name, tostring(value))
         end
@@ -607,21 +635,22 @@ local function CreateSlider(name, tableRef, configKey, min, max, isDecimal)
 end
 
 -- ==========================================
--- POPULATE NEON MENU
+-- POPULATE NEON MENU (DZ STORE V2)
 -- ==========================================
 CreateSection("AIMBOT SYSTEM")
 CreateToggle("Enable Aimbot", Aimbot, "enabled")
-CreateToggle("Instant Lock", Aimbot, "instantLock")
+CreateToggle("Wall Check", Aimbot, "wallCheck")
+CreateToggle("Team Check", Aimbot, "teamCheck")
 CreateToggle("Auto Fire", Aimbot, "autoFire")
 CreateToggle("Show FOV Circle", Aimbot, "showFov")
 CreateSlider("FOV Radius", Aimbot, "fov", 10, 800, false)
-CreateSlider("Smoothness", Aimbot, "smoothness", 0, 0.99, true)
 
 CreateSection("SILENT AIM")
-CreateToggle("Enable Silent Aim (Tools)", Aimbot, "silentAim")
+CreateToggle("Enable Silent Aim", Aimbot, "silentAim")
 
-CreateSection("VISUAL METRICS")
+CreateSection("VISUAL METRICS (ESP)")
+CreateToggle("Name ESP", ESP, "nameEnabled")
 CreateToggle("Skeleton ESP", ESP, "skeletonEnabled")
 CreateToggle("Snaplines", ESP, "lineEnabled")
-CreateToggle("Team Check", ESP, "teamCheck")
+CreateToggle("Team Check (ESP)", ESP, "teamCheck")
 CreateSlider("Max Distance", ESP, "maxDistance", 100, 10000, false)
