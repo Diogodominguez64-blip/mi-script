@@ -67,7 +67,7 @@ fovCircle.Visible = Aimbot.showFov
 
 -- Notify User
 game.StarterGui:SetCore("SendNotification", {
-    Title = "DZ STORE V3",
+    Title = "DZ STORE V3.1",
     Text = "Hacks cargados con éxito.",
     Duration = 5
 })
@@ -316,7 +316,7 @@ local LogoImage = create("ImageLabel", {
 }, Header)
 
 local FallbackText = create("TextLabel", {
-    Name = "HeaderText", Text = "DZ STORE V3", TextColor3 = Theme.NeonAccent, TextSize = 22,
+    Name = "HeaderText", Text = "DZ STORE V3.1", TextColor3 = Theme.NeonAccent, TextSize = 22,
     Font = Enum.Font.GothamBold, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false
 }, Header)
 
