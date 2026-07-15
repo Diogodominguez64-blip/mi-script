@@ -1,6 +1,6 @@
 -- ==========================================
 -- DZ STORE V3 - Neon UI Redesign (Optimized)
--- Version: 3.1 (Aimbot, Name ESP, Silent Aim, Wall Check & FOV Slider)
+-- Version: 3.2 (Aimbot, Name ESP, Silent Aim, Wall Check, FOV & Smoothness Slider)
 -- ==========================================
 
 local Players = game:GetService("Players")
@@ -24,7 +24,7 @@ local Theme = {
 local Aimbot = {
     enabled = true,
     fov = 150,
-    smoothness = 0.3,
+    smoothness = 70, -- 1 = Agresivo/Instantáneo, 100 = Muy Suave/Legit
     aimKey = Enum.UserInputType.MouseButton2,
     teamCheck = false,
     wallCheck = false,
@@ -193,7 +193,9 @@ local function AimAt(target)
         Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPosition)
     else
         local targetDir = (targetPosition - Camera.CFrame.Position).Unit
-        local newLook = Camera.CFrame.LookVector:Lerp(targetDir, 1 - Aimbot.smoothness)
+        -- Conversión del slider 1-100 a un factor de Lerp matemático real
+        local lerpFactor = math.clamp((101 - Aimbot.smoothness) / 100, 0.01, 1)
+        local newLook = Camera.CFrame.LookVector:Lerp(targetDir, lerpFactor)
         Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + newLook)
     end
     
@@ -253,7 +255,6 @@ Players.PlayerRemoving:Connect(ClearPlayerESP)
 -- USER INTERFACE DESIGN
 -- ==========================================
 
--- Instance creation helper to heavily compact GUI generation code
 local function create(className, properties, parent)
     local obj = Instance.new(className)
     for prop, val in pairs(properties) do obj[prop] = val end
@@ -308,7 +309,6 @@ UserInputService.InputBegan:Connect(function(input, gp)
     if not gp and input.KeyCode == Enum.KeyCode.Insert then ToggleMenu() end
 end)
 
--- Window Drag System
 local dragging, dragInput, dragStart, startPos
 Header.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -436,7 +436,6 @@ local function CreateSlider(name, tableRef, configKey, min, max)
     container.MouseLeave:Connect(function() hoverEffect:Cancel() container.BackgroundColor3 = Theme.ElementBg end)
 end
 
--- Filter/Search Mechanism
 SearchBar:GetPropertyChangedSignal("Text"):Connect(function()
     local query = SearchBar.Text:lower()
     for _, child in ipairs(ContentFrame:GetChildren()) do
@@ -449,11 +448,15 @@ SearchBar:GetPropertyChangedSignal("Text"):Connect(function()
     end
 end)
 
--- Build out structural UI elements
+-- ==========================================
+-- CONSTRUCCIÓN DE LA INTERFAZ
+-- ==========================================
+
 CreateSection("SISTEMA AIMBOT")
 CreateToggle("Habilitar Aimbot", Aimbot, "enabled")
 CreateToggle("Mostrar Circulo FOV", Aimbot, "showFov")
 CreateSlider("Radio del FOV", Aimbot, "fov", 10, 600)
+CreateSlider("Suavidad (1=Agresivo, 100=Suave)", Aimbot, "smoothness", 1, 100) -- <- Nuevo slider añadido aquí
 CreateToggle("Verificación de Paredes", Aimbot, "wallCheck")
 CreateToggle("Comprobación de Equipo", Aimbot, "teamCheck")
 CreateToggle("Predicción de Movimiento", Aimbot, "prediction")
@@ -478,7 +481,6 @@ local lastTargetTime, targetUpdateInterval, currentTarget = 0, 0.016, nil
 RunService.Heartbeat:Connect(function()
     if Aimbot.silentAim then ExecuteSilentAim() end
     
-    -- Compact, fully optimized NoRecoil implementation without memory leaking event hooks
     if NoRecoil.enabled and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
         local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
         local handle = tool and tool:FindFirstChildOfClass("BasePart")
@@ -513,7 +515,6 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- Render ESP Draw calls
     for _, player in ipairs(Players:GetPlayers()) do
         if not IsESPValid(player) then
             ClearPlayerESP(player)
