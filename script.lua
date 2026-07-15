@@ -68,7 +68,7 @@ fovCircle.Visible = Aimbot.showFov
 -- Notify User
 game.StarterGui:SetCore("SendNotification", {
     Title = "DZ STORE V3",
-    Text = "Hacks cargados para: " .. (game.PlaceId == 1234567890 and "Overkiller" or "Original Game"),
+    Text = "Hacks cargados con éxito.",
     Duration = 5
 })
 
@@ -113,53 +113,23 @@ end
 -- AIMBOT & SILENT AIM LOGIC
 -- ==========================================
 
-local function FindClosestEnemyByDistance()
-    local closestEnemy, closestDistance = nil, math.huge
-    local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not localRoot then return nil end
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if not IsValidTarget(player) then continue end
-        local enemyPart = player.Character:FindFirstChild(Aimbot.silentAimPart)
-        if enemyPart then
-            local distance = (enemyPart.Position - localRoot.Position).Magnitude
-            if distance < closestDistance then
-                closestDistance = distance
-                closestEnemy = player
-            end
-        end
-    end
-    return closestEnemy
-end
-
-local function ExecuteSilentAim()
-    if not Aimbot.silentAim then return end
-    local closestEnemy = FindClosestEnemyByDistance()
-    if closestEnemy and closestEnemy.Character then
-        local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-        if tool then tool:Activate() end
-    end
-end
-
-UserInputService.InputBegan:Connect(function(input, gp)
-    if not gp and input.UserInputType == Enum.UserInputType.MouseButton1 and Aimbot.silentAim then
-        ExecuteSilentAim()
-    end
-end)
-
 local function GetClosestPlayerToCursor()
-    local closestPlayer, shortestDistance = nil, Aimbot.fov
-    local mousePosition = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local closestPlayer = nil
+    local shortestDistance = Aimbot.fov
     
     for _, player in ipairs(Players:GetPlayers()) do
         if not IsValidTarget(player) then continue end
-        local targetBone = player.Character:FindFirstChild(Aimbot.bone) or player.Character:FindFirstChild("HumanoidRootPart")
+        local character = player.Character
+        local targetBone = character:FindFirstChild(Aimbot.bone) or character:FindFirstChild("HumanoidRootPart")
         if not targetBone then continue end
         
         local vector, onScreen = Camera:WorldToViewportPoint(targetBone.Position)
         if not onScreen then continue end
         
-        local distance = (mousePosition - Vector2.new(vector.X, vector.Y)).Magnitude
+        local mousePosition = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        local bonePosition = Vector2.new(vector.X, vector.Y)
+        local distance = (mousePosition - bonePosition).Magnitude
+        
         if distance < shortestDistance then
             shortestDistance = distance
             closestPlayer = player
@@ -180,7 +150,9 @@ local function GetPredictedPosition(target)
     
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     local distance = root and (root.Position - target.Position).Magnitude or (Camera.CFrame.Position - target.Position).Magnitude
-    return target.Position + (velocity * (distance / 2000) * Aimbot.predictionAmount)
+    local timeToReach = distance / 2000
+    
+    return target.Position + (velocity * timeToReach * Aimbot.predictionAmount)
 end
 
 local function AimAt(target)
@@ -189,20 +161,80 @@ local function AimAt(target)
     if not targetBone then return end
     
     local targetPosition = GetPredictedPosition(targetBone)
-    if Aimbot.instantLock then
+    
+    -- Mapeo del slider: 1 = Agresivo/Instantáneo (lerp step 1.0), 100 = Legit (lerp step 0.01)
+    local lerpStep = 1 - ((Aimbot.smoothness - 1) / 99)
+    lerpStep = math.clamp(lerpStep, 0.01, 1)
+
+    if Aimbot.instantLock or Aimbot.smoothness == 1 then
         Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPosition)
     else
+        local currentLook = Camera.CFrame.LookVector
         local targetDir = (targetPosition - Camera.CFrame.Position).Unit
-        -- Conversión del slider 1-100 a un factor de Lerp matemático real
-        local lerpFactor = math.clamp((101 - Aimbot.smoothness) / 100, 0.01, 1)
-        local newLook = Camera.CFrame.LookVector:Lerp(targetDir, lerpFactor)
+        local newLook = currentLook:Lerp(targetDir, lerpStep)
         Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + newLook)
     end
-    
-    if Aimbot.autoFire and UserInputService:IsMouseButtonPressed(Aimbot.aimKey) and mouse1press then
-        mouse1press() task.wait(0.05) mouse1release()
+end
+
+-- Silent Aim Auxiliar functions
+local function isAimingAtEnemy(player)
+    local character = player.Character
+    if not character then return false end
+
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return false end
+
+    local camera = workspace.CurrentCamera
+    local cameraCFrame = camera.CFrame
+
+    local aimDirection = (cameraCFrame.LookVector * 1000) + cameraCFrame.Position
+
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+    local result = workspace:Raycast(cameraCFrame.Position, cameraCFrame.LookVector * 1000, raycastParams)
+    if result and result.Instance and result.Instance:IsA("BasePart") then
+        local enemy = result.Instance:FindFirstAncestorOfClass("Model")
+        if enemy and enemy:IsA("Model") and enemy:FindFirstChildOfClass("Humanoid") then
+            return true, enemy
+        end
+    end
+
+    return false, nil
+end
+
+local function simulateHit(player, enemy)
+    local humanoid = enemy:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        local fakeHit = Instance.new("RemoteEvent")
+        fakeHit.Name = "FakeHit"
+        fakeHit.Parent = player
+        fakeHit:FireServer(enemy, humanoid)
     end
 end
+
+local function ExecuteSilentAim()
+    if not Aimbot.silentAim then return end
+    local closestEnemy = GetClosestPlayerToCursor()
+    if closestEnemy and closestEnemy.Character then
+        local enemyPart = closestEnemy.Character:FindFirstChild(Aimbot.silentAimPart)
+        if enemyPart then
+            simulateHit(LocalPlayer, closestEnemy.Character)
+        end
+    end
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        local player = Players.LocalPlayer
+        local isAiming, enemy = isAimingAtEnemy(player)
+        if isAiming then
+            simulateHit(player, enemy)
+        end
+    end
+end)
 
 -- ==========================================
 -- ESP SYSTEM
@@ -219,7 +251,7 @@ local function createDrawings(player)
         {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"},
         {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}
     }
-    
+
     for i, boneGroup in ipairs(bones) do
         local line = Drawing.new("Line")
         line.Thickness = ESP.skeletonThickness
@@ -227,16 +259,16 @@ local function createDrawings(player)
         line.Transparency = 1
         drawings.Skeleton[i] = {line = line, parts = boneGroup}
     end
-    
+
     drawings.Line.Thickness = ESP.lineThickness
     drawings.Line.Color = ESP.lineColor
     drawings.Line.Transparency = 1
-    
+
     drawings.Name.Size = 18
     drawings.Name.Color = ESP.lineColor
     drawings.Name.Outline = true
     drawings.Name.Center = true
-    
+
     ESP_Drawings[player] = drawings
 end
 
@@ -256,7 +288,7 @@ Players.PlayerRemoving:Connect(ClearPlayerESP)
 -- ==========================================
 
 local function create(className, properties, parent)
-    local obj = Instance.new(className)
+   local obj = Instance.new(className)
     for prop, val in pairs(properties) do obj[prop] = val end
     if parent then obj.Parent = parent end
     return obj
@@ -271,23 +303,37 @@ local MainFrame = create("Frame", {
 }, ScreenGui)
 create("UICorner", { CornerRadius = UDim.new(0, 12) }, MainFrame)
 
-local Header = create("Frame", { Name = "Header", Size = UDim2.new(1, 0, 0, 50), BackgroundColor3 = Theme.HeaderBg, BorderSizePixel = 0 }, MainFrame)
+local Header = create("Frame", { Name = "Header", Size = UDim2.new(1, 0, 0, 65), BackgroundColor3 = Theme.HeaderBg, BorderSizePixel = 0 }, MainFrame)
 create("UICorner", { CornerRadius = UDim.new(0, 12) }, Header)
 
-create("TextLabel", {
-    Name = "HeaderText", Text = "DZ STORE V3", TextColor3 = Theme.NeonAccent, TextSize = 22,
-    Font = Enum.Font.GothamBold, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1
+-- Logo.png integration with beautiful text fallback
+local LogoImage = create("ImageLabel", {
+    Name = "LogoImage", Size = UDim2.new(1, -40, 1, -10), Position = UDim2.new(0, 20, 0, 5),
+    BackgroundTransparency = 1, Image = "logo.png", ScaleType = Enum.ScaleType.Fit
 }, Header)
 
+local FallbackText = create("TextLabel", {
+    Name = "HeaderText", Text = "DZ STORE V3", TextColor3 = Theme.NeonAccent, TextSize = 22,
+    Font = Enum.Font.GothamBold, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false
+}, Header)
+
+-- Se comprueba si la imagen cargó para alternar fallbacks
+LogoImage:GetPropertyChangedSignal("IsLoaded"):Connect(function()
+    if not LogoImage.IsLoaded then
+        LogoImage.Visible = false
+        FallbackText.Visible = true
+    end
+end)
+
 local SearchBar = create("TextBox", {
-    Name = "SearchBar", Size = UDim2.new(0.9, 0, 0, 35), Position = UDim2.new(0.05, 0, 0, 60),
+    Name = "SearchBar", Size = UDim2.new(0.9, 0, 0, 35), Position = UDim2.new(0.05, 0, 0, 75),
     BackgroundColor3 = Theme.SearchBg, TextColor3 = Theme.Text, PlaceholderColor3 = Color3.fromRGB(150, 150, 150),
     TextSize = 14, Font = Enum.Font.SourceSans, PlaceholderText = "Buscar función...", Text = ""
 }, MainFrame)
 create("UICorner", { CornerRadius = UDim.new(0, 8) }, SearchBar)
 
 local ContentFrame = create("ScrollingFrame", {
-    Name = "ContentFrame", Size = UDim2.new(1, -20, 1, -115), Position = UDim2.new(0, 10, 0, 105),
+    Name = "ContentFrame", Size = UDim2.new(1, -20, 1, -135), Position = UDim2.new(0, 10, 0, 120),
     BackgroundTransparency = 1, CanvasSize = UDim2.new(0, 0, 0, 0), ScrollBarThickness = 4, ScrollBarImageColor3 = Theme.NeonAccent
 }, MainFrame)
 
@@ -309,6 +355,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
     if not gp and input.KeyCode == Enum.KeyCode.Insert then ToggleMenu() end
 end)
 
+-- Frame Dragging (Soporte táctil móvil incluido)
 local dragging, dragInput, dragStart, startPos
 Header.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -346,12 +393,12 @@ end
 local function CreateToggle(name, tableRef, configKey)
     local container = create("Frame", { Size = UDim2.new(1, -10, 0, 44), BackgroundColor3 = Theme.ElementBg, BorderSizePixel = 0 }, ContentFrame)
     create("UICorner", { CornerRadius = UDim.new(0, 8) }, container)
-    
+
     create("TextLabel", {
         Size = UDim2.new(0.6, 0, 1, 0), Position = UDim2.new(0, 12, 0, 0), BackgroundTransparency = 1,
         Text = name, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.GothamSemibold, TextSize = 14
     }, container)
-    
+
     local btn = create("TextButton", {
         Size = UDim2.new(0, 60, 0, 26), Position = UDim2.new(1, -72, 0.5, -13), Text = tableRef[configKey] and "ON" or "OFF",
         BackgroundColor3 = tableRef[configKey] and Theme.NeonAccent or Theme.Inactive,
@@ -359,7 +406,7 @@ local function CreateToggle(name, tableRef, configKey)
         Font = Enum.Font.GothamBold, TextSize = 12, BorderSizePixel = 0
     }, container)
     create("UICorner", { CornerRadius = UDim.new(0, 6) }, btn)
-    
+
     local hoverEffect = TweenService:Create(container, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(34, 34, 40) })
     container.MouseEnter:Connect(function() hoverEffect:Play() end)
     container.MouseLeave:Connect(function() hoverEffect:Cancel() container.BackgroundColor3 = Theme.ElementBg end)
@@ -367,12 +414,12 @@ local function CreateToggle(name, tableRef, configKey)
     btn.MouseButton1Click:Connect(function()
         tableRef[configKey] = not tableRef[configKey]
         btn.Text = tableRef[configKey] and "ON" or "OFF"
-        
+
         TweenService:Create(btn, TweenInfo.new(0.2), {
             BackgroundColor3 = tableRef[configKey] and Theme.NeonAccent or Theme.Inactive,
             TextColor3 = tableRef[configKey] and Theme.TextDark or Theme.Text
         }):Play()
-        
+
         if configKey == "showFov" or configKey == "enabled" then
             fovCircle.Visible = Aimbot.enabled and Aimbot.showFov
         end
@@ -456,7 +503,7 @@ CreateSection("SISTEMA AIMBOT")
 CreateToggle("Habilitar Aimbot", Aimbot, "enabled")
 CreateToggle("Mostrar Circulo FOV", Aimbot, "showFov")
 CreateSlider("Radio del FOV", Aimbot, "fov", 10, 600)
-CreateSlider("Suavidad (1=Agresivo, 100=Suave)", Aimbot, "smoothness", 1, 100) -- <- Nuevo slider añadido aquí
+CreateSlider("Suavidad (1=Agresivo, 100=Suave)", Aimbot, "smoothness", 1, 100)
 CreateToggle("Verificación de Paredes", Aimbot, "wallCheck")
 CreateToggle("Comprobación de Equipo", Aimbot, "teamCheck")
 CreateToggle("Predicción de Movimiento", Aimbot, "prediction")
@@ -515,6 +562,7 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
+    -- Render ESP Draw calls
     for _, player in ipairs(Players:GetPlayers()) do
         if not IsESPValid(player) then
             ClearPlayerESP(player)
