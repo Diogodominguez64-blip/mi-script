@@ -1,6 +1,6 @@
 -- ==========================================
 -- DZ STORE V3 - Neon UI Redesign
--- Version: 3.0 (Aimbot, Name ESP, Silent Aim, Wall Check)
+-- Version: 3.1 (Aimbot, Name ESP, Silent Aim, Wall Check & FOV Slider)
 -- ==========================================
 
 -- Servicios de Roblox
@@ -23,10 +23,10 @@ local Theme = {
     SearchBg = Color3.fromRGB(30, 30, 35)
 }
 
--- Configuraciones de las Funciones
+-- Configurations de las Funciones
 local Aimbot = {
     enabled = true,
-    fov = 150,
+    fov = 150, -- FOV editable inicializado en 150
     smoothness = 0.3,
     aimKey = Enum.UserInputType.MouseButton2,
     teamCheck = false,
@@ -303,7 +303,6 @@ Players.PlayerRemoving:Connect(ClearPlayerESP)
 
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "DZ_STORE_V3_GUI"
--- Soporte multiplataforma e inyectores
 local success, coreGui = pcall(function() return game:GetService("CoreGui") end)
 ScreenGui.Parent = success and coreGui or LocalPlayer:WaitForChild("PlayerGui")
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -376,7 +375,7 @@ ListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     ContentFrame.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y + 10)
 end)
 
--- Botón Flotante Modernizado (Sin Ojo / Estilo Neón Minimalista)
+-- Botón Flotante Modernizado (Sin Ojo)
 local MobileFloatingButton = Instance.new("TextButton")
 MobileFloatingButton.Parent = ScreenGui
 MobileFloatingButton.Size = UDim2.new(0, 50, 0, 50)
@@ -499,7 +498,6 @@ local function CreateToggle(name, tableRef, configKey)
         tableRef[configKey] = not tableRef[configKey]
         btn.Text = tableRef[configKey] and "ON" or "OFF"
         
-        -- Transiciones de Color suaves al activar/desactivar
         TweenService:Create(btn, TweenInfo.new(0.2), {
             BackgroundColor3 = tableRef[configKey] and Theme.NeonAccent or Theme.Inactive,
             TextColor3 = tableRef[configKey] and Theme.TextDark or Theme.Text
@@ -511,7 +509,93 @@ local function CreateToggle(name, tableRef, configKey)
     end)
 end
 
--- Lógica funcional de la Barra de Búsqueda
+-- ==========================================
+-- NUEVA FUNCIÓN: SLIDER DE FOV EDITABLE
+-- ==========================================
+local function CreateSlider(name, tableRef, configKey, min, max)
+    local container = Instance.new("Frame", ContentFrame)
+    container.Size = UDim2.new(1, -10, 0, 65) -- Alto extendido para slider
+    container.BackgroundColor3 = Theme.ElementBg
+    container.BorderSizePixel = 0
+    Instance.new("UICorner", container).CornerRadius = UDim.new(0, 8)
+
+    local label = Instance.new("TextLabel", container)
+    label.Size = UDim2.new(1, -24, 0, 25)
+    label.Position = UDim2.new(0, 12, 0, 4)
+    label.BackgroundTransparency = 1
+    label.Text = name .. ": " .. tostring(tableRef[configKey])
+    label.TextColor3 = Theme.Text
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Font = Enum.Font.GothamSemibold
+    label.TextSize = 14
+
+    local sliderBar = Instance.new("TextButton", container)
+    sliderBar.Size = UDim2.new(1, -24, 0, 8)
+    sliderBar.Position = UDim2.new(0, 12, 0, 38)
+    sliderBar.BackgroundColor3 = Theme.Inactive
+    sliderBar.BorderSizePixel = 0
+    sliderBar.Text = ""
+    Instance.new("UICorner", sliderBar).CornerRadius = UDim.new(0, 4)
+
+    local sliderFill = Instance.new("Frame", sliderBar)
+    sliderFill.Size = UDim2.new((tableRef[configKey] - min) / (max - min), 0, 1, 0)
+    sliderFill.BackgroundColor3 = Theme.NeonAccent
+    sliderFill.BorderSizePixel = 0
+    Instance.new("UICorner", sliderFill).CornerRadius = UDim.new(0, 4)
+
+    local sliderButton = Instance.new("TextButton", sliderBar)
+    sliderButton.Size = UDim2.new(0, 16, 0, 16)
+    sliderButton.Position = UDim2.new((tableRef[configKey] - min) / (max - min), -8, 0.5, -8)
+    sliderButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    sliderButton.BorderSizePixel = 0
+    sliderButton.Text = ""
+    Instance.new("UICorner", sliderButton).CornerRadius = UDim.new(1, 0)
+
+    local isSliding = false
+
+    local function updateSliderValue()
+        local mousePos = UserInputService:GetMouseLocation()
+        local relativeX = mousePos.X - sliderBar.AbsolutePosition.X
+        local percentage = math.clamp(relativeX / sliderBar.AbsoluteSize.X, 0, 1)
+
+        sliderButton.Position = UDim2.new(percentage, -8, 0.5, -8)
+        sliderFill.Size = UDim2.new(percentage, 0, 1, 0)
+
+        local value = math.floor(min + (percentage * (max - min)))
+        tableRef[configKey] = value
+        label.Text = name .. ": " .. tostring(value)
+
+        -- Actualizar FOV dinámicamente si es la propiedad del Aimbot
+        if configKey == "fov" then
+            fovCircle.Radius = value
+        end
+    end
+
+    sliderButton.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isSliding = true
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isSliding = false
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if isSliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            updateSliderValue()
+        end
+    end)
+
+    -- Hover suave
+    local hoverEffect = TweenService:Create(container, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundColor3 = Color3.fromRGB(34, 34, 40) })
+    container.MouseEnter:Connect(function() hoverEffect:Play() end)
+    container.MouseLeave:Connect(function() hoverEffect:Cancel(); container.BackgroundColor3 = Theme.ElementBg end)
+end
+
+-- Lógica funcional de la Barra de Búsqueda (Incluye soporte para sliders)
 SearchBar:GetPropertyChangedSignal("Text"):Connect(function()
     local query = SearchBar.Text:lower()
     for _, child in ipairs(ContentFrame:GetChildren()) do
@@ -528,10 +612,11 @@ SearchBar:GetPropertyChangedSignal("Text"):Connect(function()
     end
 end)
 
--- Construcción de la UI
+-- Construcción ordenada de la UI con el nuevo Slider de FOV
 CreateSection("SISTEMA AIMBOT")
 CreateToggle("Habilitar Aimbot", Aimbot, "enabled")
 CreateToggle("Mostrar Circulo FOV", Aimbot, "showFov")
+CreateSlider("Radio del FOV", Aimbot, "fov", 10, 600) -- FOV Editable (Rango: 10 a 600)
 CreateToggle("Verificación de Paredes", Aimbot, "wallCheck")
 CreateToggle("Comprobación de Equipo", Aimbot, "teamCheck")
 CreateToggle("Predicción de Movimiento", Aimbot, "prediction")
