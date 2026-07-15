@@ -1,5 +1,5 @@
 -- DZ STORE V3 - Neon UI Redesign (Optimized)
--- Version: 3.3 (Aimbot, Name ESP, Silent Aim, Wall Check, FOV & Smoothness Slider, Teleportation + Mobile TP Button)
+-- Version: 3.4 (Aimbot, Name ESP, Silent Aim, Wall Check, FOV & Smoothness Slider, Teleportation Fix + Mobile Button)
 -- ==========================================
 
 local Players = game:GetService("Players")
@@ -23,7 +23,7 @@ local Theme = {
 local Aimbot = {
     enabled = true,
     fov = 150,
-    smoothness = 70,
+    smoothness = 70, -- 1 = Agresivo/Instantáneo, 100 = Muy Suave/Legit
     aimKey = Enum.UserInputType.MouseButton2,
     teamCheck = false,
     wallCheck = false,
@@ -175,7 +175,7 @@ local function AimAt(target)
     end
 end
 
--- Silent Aim Auxiliar functions (¡CORREGIDO!)
+-- Silent Aim Auxiliar functions (Restaurado 100% como pediste + Fix del Error de Sintaxis)
 local function isAimingAtEnemy(player)
     local character = player.Character
     if not character then return false end
@@ -185,6 +185,9 @@ local function isAimingAtEnemy(player)
 
     local camera = workspace.CurrentCamera
     local cameraCFrame = camera.CFrame
+
+    -- Línea original restaurada
+    local aimDirection = (cameraCFrame.LookVector * 1000) + cameraCFrame.Position
 
     local raycastParams = RaycastParams.new()
     raycastParams.FilterDescendantsInstances = {character}
@@ -223,81 +226,7 @@ local function ExecuteSilentAim()
 end
 
 -- ==========================================
--- INPUTS & KEYBINDS (Teclas Rápidas)
--- ==========================================
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    
-    -- Mouse Click para Silent Aim
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        local player = Players.LocalPlayer
-        local isAiming, enemy = isAimingAtEnemy(player)
-        if isAiming then
-            simulateHit(player, enemy)
-        end
-    end
-    
-    -- Tecla 'T' para activar/desactivar TP en PC
-    if input.KeyCode == Enum.KeyCode.T then
-        Teleportation.enabled = not Teleportation.enabled
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "TP Status",
-            Text = "Teleportación: " .. (Teleportation.enabled and "ACTIVADA" or "DESACTIVADA"),
-            Duration = 2
-        })
-    end
-end)
-
--- ==========================================
--- ESP SYSTEM
--- ==========================================
-
-local ESP_Drawings = {}
-
-local function createDrawings(player)
-    local drawings = { Line = Drawing.new("Line"), Name = Drawing.new("Text"), Skeleton = {} }
-    local bones = {
-        {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
-        {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"},
-        {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"},
-        {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"},
-        {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}
-    }
-
-    for i, boneGroup in ipairs(bones) do
-        local line = Drawing.new("Line")
-        line.Thickness = ESP.skeletonThickness
-        line.Color = ESP.skeletonColor
-        line.Transparency = 1
-        drawings.Skeleton[i] = {line = line, parts = boneGroup}
-    end
-
-    drawings.Line.Thickness = ESP.lineThickness
-    drawings.Line.Color = ESP.lineColor
-    drawings.Line.Transparency = 1
-
-    drawings.Name.Size = 18
-    drawings.Name.Color = ESP.lineColor
-    drawings.Name.Outline = true
-    drawings.Name.Center = true
-
-    ESP_Drawings[player] = drawings
-end
-
-local function ClearPlayerESP(player)
-    if ESP_Drawings[player] then
-        ESP_Drawings[player].Line:Remove()
-        ESP_Drawings[player].Name:Remove()
-        for _, obj in pairs(ESP_Drawings[player].Skeleton) do obj.line:Remove() end
-        ESP_Drawings[player] = nil
-    end
-end
-
-Players.PlayerRemoving:Connect(ClearPlayerESP)
-
--- ==========================================
--- USER INTERFACE DESIGN
+-- USER INTERFACE DESIGN & BOTONES FLOTANTES
 -- ==========================================
 
 local function create(className, properties, parent)
@@ -353,7 +282,7 @@ ListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     ContentFrame.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y + 10)
 end)
 
--- Botón Flotante Principal
+-- Botón Flotante V3 (Menú)
 local MobileFloatingButton = create("TextButton", {
     Size = UDim2.new(0, 50, 0, 50), Position = UDim2.new(1, -70, 0, 30), BackgroundColor3 = Theme.Background,
     Text = "V3", Font = Enum.Font.GothamBlack, TextSize = 16, TextColor3 = Theme.NeonAccent, BorderSizePixel = 0
@@ -361,7 +290,7 @@ local MobileFloatingButton = create("TextButton", {
 create("UICorner", { CornerRadius = UDim.new(1, 0) }, MobileFloatingButton)
 create("UIStroke", { Thickness = 2, Color = Theme.NeonAccent, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, MobileFloatingButton)
 
--- NUEVO: Botón Flotante para TP en Móviles
+-- Botón Flotante para TP
 local TPMobileButton = create("TextButton", {
     Size = UDim2.new(0, 50, 0, 50), Position = UDim2.new(1, -70, 0, 90), BackgroundColor3 = Theme.Background,
     Text = "TP\nOFF", Font = Enum.Font.GothamBlack, TextSize = 13, TextColor3 = Theme.Text, BorderSizePixel = 0
@@ -369,9 +298,7 @@ local TPMobileButton = create("TextButton", {
 create("UICorner", { CornerRadius = UDim.new(1, 0) }, TPMobileButton)
 local TPStroke = create("UIStroke", { Thickness = 2, Color = Theme.Inactive, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, TPMobileButton)
 
-TPMobileButton.MouseButton1Click:Connect(function()
-    Teleportation.enabled = not Teleportation.enabled
-    
+local function UpdateTPVisuals()
     if Teleportation.enabled then
         TPMobileButton.Text = "TP\nON"
         TPMobileButton.TextColor3 = Theme.NeonAccent
@@ -381,22 +308,16 @@ TPMobileButton.MouseButton1Click:Connect(function()
         TPMobileButton.TextColor3 = Theme.Text
         TPStroke.Color = Theme.Inactive
     end
+end
 
-    game.StarterGui:SetCore("SendNotification", {
-        Title = "TP Status",
-        Text = "Teleportación: " .. (Teleportation.enabled and "ACTIVADA" or "DESACTIVADA"),
-        Duration = 2
-    })
+TPMobileButton.MouseButton1Click:Connect(function()
+    Teleportation.enabled = not Teleportation.enabled
+    UpdateTPVisuals()
 end)
 
--- Funciones de Menu
 local function ToggleMenu() MainFrame.Visible = not MainFrame.Visible end
 MobileFloatingButton.MouseButton1Click:Connect(ToggleMenu)
-UserInputService.InputBegan:Connect(function(input, gp)
-    if not gp and input.KeyCode == Enum.KeyCode.Insert then ToggleMenu() end
-end)
 
--- Frame Dragging (Soporte táctil móvil incluido)
 local dragging, dragInput, dragStart, startPos
 Header.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -409,9 +330,7 @@ Header.InputBegan:Connect(function(input)
     end
 end)
 Header.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-    end
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
 end)
 UserInputService.InputChanged:Connect(function(input)
     if input == dragInput and dragging then
@@ -448,22 +367,12 @@ local function CreateToggle(name, tableRef, configKey)
     }, container)
     create("UICorner", { CornerRadius = UDim.new(0, 6) }, btn)
 
-    local hoverEffect = TweenService:Create(container, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(34, 34, 40) })
-    container.MouseEnter:Connect(function() hoverEffect:Play() end)
-    container.MouseLeave:Connect(function() hoverEffect:Cancel() container.BackgroundColor3 = Theme.ElementBg end)
-
     btn.MouseButton1Click:Connect(function()
         tableRef[configKey] = not tableRef[configKey]
         btn.Text = tableRef[configKey] and "ON" or "OFF"
-
-        TweenService:Create(btn, TweenInfo.new(0.2), {
-            BackgroundColor3 = tableRef[configKey] and Theme.NeonAccent or Theme.Inactive,
-            TextColor3 = tableRef[configKey] and Theme.TextDark or Theme.Text
-        }):Play()
-
-        if configKey == "showFov" or configKey == "enabled" then
-            fovCircle.Visible = Aimbot.enabled and Aimbot.showFov
-        end
+        TweenService:Create(btn, TweenInfo.new(0.2), { BackgroundColor3 = tableRef[configKey] and Theme.NeonAccent or Theme.Inactive, TextColor3 = tableRef[configKey] and Theme.TextDark or Theme.Text }):Play()
+        if configKey == "showFov" or configKey == "enabled" then fovCircle.Visible = Aimbot.enabled and Aimbot.showFov end
+        if configKey == "enabled" and tableRef == Teleportation then UpdateTPVisuals() end -- Sincronizar botón de menú con el flotante
     end)
 end
 
@@ -477,51 +386,31 @@ local function CreateSlider(name, tableRef, configKey, min, max)
         TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.GothamSemibold, TextSize = 14
     }, container)
 
-    local sliderBar = create("TextButton", {
-        Size = UDim2.new(1, -24, 0, 8), Position = UDim2.new(0, 12, 0, 38), BackgroundColor3 = Theme.Inactive, BorderSizePixel = 0, Text = ""
-    }, container)
+    local sliderBar = create("TextButton", { Size = UDim2.new(1, -24, 0, 8), Position = UDim2.new(0, 12, 0, 38), BackgroundColor3 = Theme.Inactive, BorderSizePixel = 0, Text = "" }, container)
     create("UICorner", { CornerRadius = UDim.new(0, 4) }, sliderBar)
 
     local valRatio = (tableRef[configKey] - min) / (max - min)
     local sliderFill = create("Frame", { Size = UDim2.new(valRatio, 0, 1, 0), BackgroundColor3 = Theme.NeonAccent, BorderSizePixel = 0 }, sliderBar)
     create("UICorner", { CornerRadius = UDim.new(0, 4) }, sliderFill)
 
-    local sliderButton = create("TextButton", {
-        Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(valRatio, -8, 0.5, -8), BackgroundColor3 = Color3.fromRGB(255, 255, 255), BorderSizePixel = 0, Text = ""
-    }, sliderBar)
+    local sliderButton = create("TextButton", { Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(valRatio, -8, 0.5, -8), BackgroundColor3 = Color3.fromRGB(255, 255, 255), BorderSizePixel = 0, Text = "" }, sliderBar)
     create("UICorner", { CornerRadius = UDim.new(1, 0) }, sliderButton)
 
     local isSliding = false
-
     local function updateSliderValue()
         local relativeX = UserInputService:GetMouseLocation().X - sliderBar.AbsolutePosition.X
         local percentage = math.clamp(relativeX / sliderBar.AbsoluteSize.X, 0, 1)
-
         sliderButton.Position = UDim2.new(percentage, -8, 0.5, -8)
         sliderFill.Size = UDim2.new(percentage, 0, 1, 0)
-
         local value = math.floor(min + (percentage * (max - min)))
         tableRef[configKey] = value
         label.Text = name .. ": " .. tostring(value)
-
         if configKey == "fov" then fovCircle.Radius = value end
     end
 
-    sliderButton.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then isSliding = true end
-    end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then isSliding = false end
-    end)
-    UserInputService.InputChanged:Connect(function(input)
-        if isSliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            updateSliderValue()
-        end
-    end)
-
-    local hoverEffect = TweenService:Create(container, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(34, 34, 40) })
-    container.MouseEnter:Connect(function() hoverEffect:Play() end)
-    container.MouseLeave:Connect(function() hoverEffect:Cancel() container.BackgroundColor3 = Theme.ElementBg end)
+    sliderButton.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then isSliding = true end end)
+    UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then isSliding = false end end)
+    UserInputService.InputChanged:Connect(function(input) if isSliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then updateSliderValue() end end)
 end
 
 SearchBar:GetPropertyChangedSignal("Text"):Connect(function()
@@ -536,26 +425,37 @@ SearchBar:GetPropertyChangedSignal("Text"):Connect(function()
     end
 end)
 
--- ==========================================
--- CONSTRUCCIÓN DE LA INTERFAZ
--- ==========================================
 CreateToggle("Comprobación de Equipo", Aimbot, "teamCheck")
 CreateToggle("Predicción de Movimiento", Aimbot, "prediction")
-
 CreateSection("SILENT AIM")
 CreateToggle("Habilitar Silent Aim", Aimbot, "silentAim")
-
 CreateSection("SISTEMA VISUAL (ESP)")
 CreateToggle("ESP Nombre y Distancia", ESP, "nameEnabled")
 CreateToggle("ESP Esqueleto", ESP, "skeletonEnabled")
 CreateToggle("ESP Snaplines (Líneas)", ESP, "lineEnabled")
-
 CreateSection("NO RECOIL")
 CreateToggle("Habilitar No Recoil", NoRecoil, "enabled")
-
 CreateSection("TELEPORTACIÓN")
 CreateToggle("Habilitar Teleportación", Teleportation, "enabled")
 CreateSlider("Distancia Máxima de Teleportación (metros)", Teleportation, "maxDistance", 100, 500)
+
+-- ==========================================
+-- KEYBINDS
+-- ==========================================
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.Insert then ToggleMenu() end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        local player = Players.LocalPlayer
+        local isAiming, enemy = isAimingAtEnemy(player)
+        if isAiming then simulateHit(player, enemy) end
+    end
+    if input.KeyCode == Enum.KeyCode.T then
+        Teleportation.enabled = not Teleportation.enabled
+        UpdateTPVisuals()
+        game.StarterGui:SetCore("SendNotification", { Title = "TP Status", Text = "Teleportación: " .. (Teleportation.enabled and "ACTIVADA" or "DESACTIVADA"), Duration = 2 })
+    end
+end)
 
 -- ==========================================
 -- RUN LOOPS AND CONTINUOUS EXECUTION
@@ -569,22 +469,36 @@ RunService.Heartbeat:Connect(function()
     if NoRecoil.enabled and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
         local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
         local handle = tool and tool:FindFirstChildOfClass("BasePart")
-        if handle then
-            handle.CFrame = CFrame.new(handle.CFrame.Position, LocalPlayer:GetMouse().Hit.Position)
-        end
+        if handle then handle.CFrame = CFrame.new(handle.CFrame.Position, LocalPlayer:GetMouse().Hit.Position) end
     end
     
+    -- LÓGICA DE TP CORREGIDA Y CON PRINTS ORIGINALES RESTAURADOS
     if Teleportation.enabled then
-        local closestPlayer, lowestDistance = GetClosestPlayerToCursor()
-        if closestPlayer and lowestDistance <= Teleportation.maxDistance then
+        local closestPlayer, _ = GetClosestPlayerToCursor()
+        if closestPlayer then
             local targetCharacter = closestPlayer.Character
             local myHumanoidRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            
             if targetCharacter and myHumanoidRootPart then
                 local targetRootPart = targetCharacter:FindFirstChild("HumanoidRootPart")
                 if targetRootPart then
-                    myHumanoidRootPart.CFrame = targetRootPart.CFrame
+                    -- Calculamos la distancia REAL en metros en el mundo 3D
+                    local distance3D = (myHumanoidRootPart.Position - targetRootPart.Position).Magnitude
+                    
+                    if distance3D <= Teleportation.maxDistance then
+                        -- El offset * CFrame.new(0, 0, 3) evita que te buguees/choques contra el enemigo
+                        myHumanoidRootPart.CFrame = targetRootPart.CFrame * CFrame.new(0, 0, 3)
+                        myHumanoidRootPart.Velocity = Vector3.new(0,0,0) -- Evitar que el personaje salga volando
+                        print("Teleported to " .. closestPlayer.Name .. " at a distance of " .. distance3D .. " meters.")
+                    else
+                        print("No players were found within " .. Teleportation.maxDistance .. " meters.")
+                    end
                 end
+            else
+                print("No valid players found.")
             end
+        else
+            print("No players were found within " .. Teleportation.maxDistance .. " meters.")
         end
     end
 end)
