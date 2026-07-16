@@ -1,6 +1,6 @@
 -- ==========================================
 -- DZ STORE V3 - Neon UI Redesign (Optimized)
--- Version: 3.2 (Aimbot, Name ESP, Silent Aim, Wall Check, FOV & Smoothness Slider)
+-- Version: 3.3 (Auto TP Player, Aimbot, ESP, Mobile Support)
 -- ==========================================
 
 local Players = game:GetService("Players")
@@ -24,7 +24,7 @@ local Theme = {
 local Aimbot = {
     enabled = true,
     fov = 150,
-    smoothness = 70, -- 1 = Agresivo/Instantáneo, 100 = Muy Suave/Legit
+    smoothness = 70,
     aimKey = Enum.UserInputType.MouseButton2,
     teamCheck = false,
     wallCheck = false,
@@ -55,7 +55,10 @@ local ESP = {
 
 local NoRecoil = { enabled = false }
 
-local Teleport = { clickTpEnabled = false }
+local Teleport = { 
+    autoTpEnabled = false,
+    distanceBehind = 3 -- Distancia a la que se teletransporta detrás del enemigo
+}
 
 -- FOV Circle setup
 local fovCircle = Drawing.new("Circle")
@@ -70,7 +73,7 @@ fovCircle.Visible = Aimbot.showFov
 -- Notify User
 game.StarterGui:SetCore("SendNotification", {
     Title = "DZ STORE V3",
-    Text = "Hacks cargados con éxito.",
+    Text = "Hacks cargados. Tecla T para Auto TP.",
     Duration = 5
 })
 
@@ -112,7 +115,7 @@ local function IsESPValid(player)
 end
 
 -- ==========================================
--- AIMBOT & SILENT AIM LOGIC
+-- AIMBOT, SILENT AIM & AUTO TP LOGIC
 -- ==========================================
 
 local function GetClosestPlayerToCursor()
@@ -135,6 +138,30 @@ local function GetClosestPlayerToCursor()
         if distance < shortestDistance then
             shortestDistance = distance
             closestPlayer = player
+        end
+    end
+    return closestPlayer
+end
+
+-- Función para buscar al jugador más cercano en distancia real (Para el TP)
+local function GetClosestPlayerDistance()
+    local closestPlayer = nil
+    local shortestDistance = math.huge
+    
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if not IsValidTarget(player) then continue end
+        local char = player.Character
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if root then
+            local distance = (myRoot.Position - root.Position).Magnitude
+            if distance < shortestDistance then
+                shortestDistance = distance
+                closestPlayer = player
+            end
         end
     end
     return closestPlayer
@@ -164,7 +191,6 @@ local function AimAt(target)
     
     local targetPosition = GetPredictedPosition(targetBone)
     
-    -- Mapeo del slider: 1 = Agresivo/Instantáneo (lerp step 1.0), 100 = Legit (lerp step 0.01)
     local lerpStep = 1 - ((Aimbot.smoothness - 1) / 99)
     lerpStep = math.clamp(lerpStep, 0.01, 1)
 
@@ -178,19 +204,13 @@ local function AimAt(target)
     end
 end
 
--- Silent Aim Auxiliar functions
 local function isAimingAtEnemy(player)
     local character = player.Character
     if not character then return false end
-
     local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
     if not humanoidRootPart then return false end
-
     local camera = workspace.CurrentCamera
     local cameraCFrame = camera.CFrame
-
-    local aimDirection = (cameraCFrame.LookVector * 1000) + cameraCFrame.Position
-
     local raycastParams = RaycastParams.new()
     raycastParams.FilterDescendantsInstances = {character}
     raycastParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -202,7 +222,6 @@ local function isAimingAtEnemy(player)
             return true, enemy
         end
     end
-
     return false, nil
 end
 
@@ -227,20 +246,27 @@ local function ExecuteSilentAim()
     end
 end
 
+-- Actualiza los colores del botón flotante de TP
+local TPFloatingButton -- Se declara aquí para que sea accesible
+
+local function UpdateTPVisuals()
+    if TPFloatingButton then
+        TPFloatingButton.Text = Teleport.autoTpEnabled and "TP: ON" or "TP: OFF"
+        TPFloatingButton.TextColor3 = Teleport.autoTpEnabled and Theme.NeonAccent or Theme.Inactive
+        local stroke = TPFloatingButton:FindFirstChild("UIStroke")
+        if stroke then
+            stroke.Color = Teleport.autoTpEnabled and Theme.NeonAccent or Theme.Inactive
+        end
+    end
+end
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     
-    -- Teleport (Click TP) Logic
-    if Teleport.clickTpEnabled and input.UserInputType == Enum.UserInputType.MouseButton1 then
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
-            local char = LocalPlayer.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                local mouse = LocalPlayer:GetMouse()
-                if mouse.Hit then
-                    char.HumanoidRootPart.CFrame = CFrame.new(mouse.Hit.Position + Vector3.new(0, 3, 0))
-                end
-            end
-        end
+    -- Tecla T para activar/desactivar Auto TP en PC
+    if input.KeyCode == Enum.KeyCode.T then
+        Teleport.autoTpEnabled = not Teleport.autoTpEnabled
+        UpdateTPVisuals()
     end
 
     -- Silent Aim original logic
@@ -323,7 +349,6 @@ create("UICorner", { CornerRadius = UDim.new(0, 12) }, MainFrame)
 local Header = create("Frame", { Name = "Header", Size = UDim2.new(1, 0, 0, 65), BackgroundColor3 = Theme.HeaderBg, BorderSizePixel = 0 }, MainFrame)
 create("UICorner", { CornerRadius = UDim.new(0, 12) }, Header)
 
--- Logo.png integration with beautiful text fallback
 local LogoImage = create("ImageLabel", {
     Name = "LogoImage", Size = UDim2.new(1, -40, 1, -10), Position = UDim2.new(0, 20, 0, 5),
     BackgroundTransparency = 1, Image = "logo.png", ScaleType = Enum.ScaleType.Fit
@@ -334,7 +359,6 @@ local FallbackText = create("TextLabel", {
     Font = Enum.Font.GothamBold, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false
 }, Header)
 
--- Se comprueba si la imagen cargó para alternar fallbacks
 LogoImage:GetPropertyChangedSignal("IsLoaded"):Connect(function()
     if not LogoImage.IsLoaded then
         LogoImage.Visible = false
@@ -359,6 +383,7 @@ ListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     ContentFrame.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y + 10)
 end)
 
+-- Botón Flotante para el Menú Principal
 local MobileFloatingButton = create("TextButton", {
     Size = UDim2.new(0, 50, 0, 50), Position = UDim2.new(1, -70, 0, 30), BackgroundColor3 = Theme.Background,
     Text = "V3", Font = Enum.Font.GothamBlack, TextSize = 16, TextColor3 = Theme.NeonAccent, BorderSizePixel = 0
@@ -370,6 +395,20 @@ local function ToggleMenu() MainFrame.Visible = not MainFrame.Visible end
 MobileFloatingButton.MouseButton1Click:Connect(ToggleMenu)
 UserInputService.InputBegan:Connect(function(input, gp)
     if not gp and input.KeyCode == Enum.KeyCode.Insert then ToggleMenu() end
+end)
+
+-- Botón Flotante para AUTO TP (Especial para móviles)
+TPFloatingButton = create("TextButton", {
+    Name = "TPFloatingButton", Size = UDim2.new(0, 50, 0, 50), Position = UDim2.new(1, -70, 0, 90), 
+    BackgroundColor3 = Theme.Background, Text = "TP: OFF", Font = Enum.Font.GothamBlack, 
+    TextSize = 12, TextColor3 = Theme.Inactive, BorderSizePixel = 0
+}, ScreenGui)
+create("UICorner", { CornerRadius = UDim.new(1, 0) }, TPFloatingButton)
+create("UIStroke", { Name = "UIStroke", Thickness = 2, Color = Theme.Inactive, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, TPFloatingButton)
+
+TPFloatingButton.MouseButton1Click:Connect(function()
+    Teleport.autoTpEnabled = not Teleport.autoTpEnabled
+    UpdateTPVisuals()
 end)
 
 -- Frame Dragging (Soporte táctil móvil incluido)
@@ -407,7 +446,7 @@ local function CreateSection(text)
     }, ContentFrame)
 end
 
-local function CreateToggle(name, tableRef, configKey)
+local function CreateToggle(name, tableRef, configKey, callback)
     local container = create("Frame", { Size = UDim2.new(1, -10, 0, 44), BackgroundColor3 = Theme.ElementBg, BorderSizePixel = 0 }, ContentFrame)
     create("UICorner", { CornerRadius = UDim.new(0, 8) }, container)
 
@@ -439,6 +478,17 @@ local function CreateToggle(name, tableRef, configKey)
 
         if configKey == "showFov" or configKey == "enabled" then
             fovCircle.Visible = Aimbot.enabled and Aimbot.showFov
+        end
+        
+        if callback then callback() end
+    end)
+    
+    -- Sincronizar UI desde el bucle principal si la variable se cambia por fuera
+    RunService.RenderStepped:Connect(function()
+        if btn.Text ~= (tableRef[configKey] and "ON" or "OFF") then
+            btn.Text = tableRef[configKey] and "ON" or "OFF"
+            btn.BackgroundColor3 = tableRef[configKey] and Theme.NeonAccent or Theme.Inactive
+            btn.TextColor3 = tableRef[configKey] and Theme.TextDark or Theme.Text
         end
     end)
 end
@@ -536,8 +586,8 @@ CreateToggle("ESP Snaplines (Líneas)", ESP, "lineEnabled")
 CreateSection("NO RECOIL")
 CreateToggle("Habilitar No Recoil", NoRecoil, "enabled")
 
-CreateSection("TELEPORT (CLICK TP)")
-CreateToggle("Habilitar Click TP (Ctrl+Click)", Teleport, "clickTpEnabled")
+CreateSection("AUTO TELEPORT")
+CreateToggle("Habilitar Auto TP (Jugador)", Teleport, "autoTpEnabled", UpdateTPVisuals)
 
 -- ==========================================
 -- RUN LOOPS AND CONTINUOUS EXECUTION
@@ -546,6 +596,21 @@ CreateToggle("Habilitar Click TP (Ctrl+Click)", Teleport, "clickTpEnabled")
 local lastTargetTime, targetUpdateInterval, currentTarget = 0, 0.016, nil
 
 RunService.Heartbeat:Connect(function()
+    -- Ejecutar Auto TP si está activado
+    if Teleport.autoTpEnabled then
+        local tpTarget = GetClosestPlayerDistance()
+        if tpTarget and tpTarget.Character then
+            local targetRoot = tpTarget.Character:FindFirstChild("HumanoidRootPart")
+            local myChar = LocalPlayer.Character
+            local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+            
+            if targetRoot and myRoot then
+                -- Teletransporta 3 studs detrás del objetivo para evitar caerse del mapa por colisión
+                myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, Teleport.distanceBehind)
+            end
+        end
+    end
+
     if Aimbot.silentAim then ExecuteSilentAim() end
     
     if NoRecoil.enabled and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
