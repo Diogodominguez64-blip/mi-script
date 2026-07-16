@@ -1,6 +1,6 @@
 -- ==========================================
--- DZ STORE V4 - Neo-Green Framework
--- Version: 4.0 (Dual-Panel UI, Auto TP, Aimbot, ESP)
+-- DZ STORE V4 - Neo-Green Framework (PRO)
+-- Version: 4.1 (Device Detection, Custom Keybinds, Fixed TP)
 -- ==========================================
 
 local Players = game:GetService("Players")
@@ -20,10 +20,30 @@ local Theme = {
     Separator = Color3.fromRGB(40, 40, 48)
 }
 
+-- Detección de Dispositivo
+local isPC = UserInputService.KeyboardEnabled
+local isBinding = false
+
+-- Configuraciones base
 local Aimbot = { enabled = false, fov = 150, smoothness = 70, teamCheck = false, wallCheck = false, showFov = true, silentAim = false }
 local ESP = { nameEnabled = false, skeletonEnabled = false, lineEnabled = false, maxDistance = 3000 }
 local Teleport = { autoTpEnabled = false, distanceBehind = 3 }
 local NoRecoil = { enabled = false }
+
+-- Sistema de Teclas Asignables (Keybinds)
+local Keybinds = {
+    MenuToggle = Enum.KeyCode.RightShift, -- Tecla por defecto para el menú
+    Aimbot_enabled = nil,
+    Aimbot_silentAim = nil,
+    Teleport_autoTpEnabled = nil,
+    NoRecoil_enabled = nil,
+    ESP_nameEnabled = nil,
+    ESP_lineEnabled = nil,
+    ESP_skeletonEnabled = nil
+}
+
+-- Referencias a los botones UI para sincronización
+local ToggleUIElements = {}
 
 -- ==========================================
 -- FOV & NOTIFICATIONS
@@ -39,20 +59,20 @@ fovCircle.Visible = false
 pcall(function()
     game.StarterGui:SetCore("SendNotification", {
         Title = "DZ STORE V4",
-        Text = "Bienvenido, Diogo. Interfaz V4 cargada.",
+        Text = isPC and "Cargado. Usa RightShift para ocultar." or "Cargado. Usa el botón flotante.",
         Duration = 5
     })
 end)
 
 -- ==========================================
--- LOGIC UTILITIES
+-- LOGIC UTILITIES & TP FIX
 -- ==========================================
-local function IsValidTarget(player)
+local function IsValidTarget(player, ignoreWall)
     if player == LocalPlayer then return false end
     local char = player.Character
     if not char or not char:FindFirstChild("Humanoid") or char.Humanoid.Health <= 0 then return false end
     if Aimbot.teamCheck and player.Team == LocalPlayer.Team then return false end
-    if Aimbot.wallCheck then
+    if not ignoreWall and Aimbot.wallCheck then
         local targetBone = char:FindFirstChild("HumanoidRootPart")
         if targetBone then
             local params = RaycastParams.new()
@@ -68,7 +88,7 @@ end
 local function GetClosestPlayerToCursor()
     local closest, minDistance = nil, Aimbot.fov
     for _, p in ipairs(Players:GetPlayers()) do
-        if IsValidTarget(p) then
+        if IsValidTarget(p, false) then
             local root = p.Character:FindFirstChild("HumanoidRootPart")
             if root then
                 local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
@@ -87,7 +107,7 @@ local function GetClosestPlayerDistance()
     local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
     for _, p in ipairs(Players:GetPlayers()) do
-        if IsValidTarget(p) then
+        if IsValidTarget(p, true) then -- TP ignora paredes para buscar
             local root = p.Character:FindFirstChild("HumanoidRootPart")
             if root then
                 local dist = (myRoot.Position - root.Position).Magnitude
@@ -123,6 +143,7 @@ end
 -- ==========================================
 local ScreenGui = Instance.new("ScreenGui", CoreGui or LocalPlayer:WaitForChild("PlayerGui"))
 ScreenGui.Name = "DZ_STORE_V4"
+ScreenGui.ResetOnSpawn = false
 
 -- Botón Flotante para ocultar/mostrar menú
 local ToggleBtn = Instance.new("TextButton", ScreenGui)
@@ -199,10 +220,8 @@ ContentLine.Position = UDim2.new(0, 0, 0, 45)
 ContentLine.BackgroundColor3 = Theme.Separator
 ContentLine.BorderSizePixel = 0
 
--- Tab Logic
-local Tabs = {}
-local TabFrames = {}
-
+-- UI logic de pestañas
+local Tabs, TabFrames = {}, {}
 local function SwitchTab(tabName)
     ContentHeader.Text = tabName
     for name, frame in pairs(TabFrames) do frame.Visible = (name == tabName) end
@@ -237,14 +256,11 @@ local function CreateTab(name)
     frame.BackgroundTransparency = 1
     frame.Visible = false
 
-    Tabs[name] = btn
-    TabFrames[name] = frame
-
+    Tabs[name] = btn; TabFrames[name] = frame
     btn.MouseButton1Click:Connect(function() SwitchTab(name) end)
     return frame
 end
 
--- UI Component Builders
 local function CreateColumn(parent, title, xPos)
     local col = Instance.new("Frame", parent)
     col.Size = UDim2.new(0.5, -15, 1, 0)
@@ -273,30 +289,110 @@ local function CreateColumn(parent, title, xPos)
     scroll.ScrollBarImageColor3 = Theme.NeonGreen
     local layout = Instance.new("UIListLayout", scroll)
     layout.Padding = UDim.new(0, 8)
-
     return scroll
 end
 
-local function CreateToggle(parent, text, tableRef, key, callback)
-    local btn = Instance.new("TextButton", parent)
-    btn.Size = UDim2.new(1, 0, 0, 32)
+-- ==========================================
+-- UI COMPONENTS (Toggle, Slider, Keybind)
+-- ==========================================
+local function CreateToggle(parent, text, tableRef, key, bindKey)
+    local row = Instance.new("Frame", parent)
+    row.Size = UDim2.new(1, 0, 0, 32)
+    row.BackgroundTransparency = 1
+
+    local btn = Instance.new("TextButton", row)
+    btn.Size = isPC and UDim2.new(1, -45, 1, 0) or UDim2.new(1, 0, 1, 0)
     btn.BackgroundColor3 = tableRef[key] and Theme.NeonGreen or Theme.ButtonBg
     btn.Text = text
     btn.Font = Enum.Font.GothamBold
     btn.TextSize = 12
     btn.TextColor3 = tableRef[key] and Color3.fromRGB(10,10,10) or Theme.TextWhite
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    
+    ToggleUIElements[bindKey] = btn -- Para sincronizar cuando se use la tecla
 
-    btn.MouseButton1Click:Connect(function()
+    local function ToggleState()
         tableRef[key] = not tableRef[key]
         TweenService:Create(btn, TweenInfo.new(0.2), {
             BackgroundColor3 = tableRef[key] and Theme.NeonGreen or Theme.ButtonBg,
             TextColor3 = tableRef[key] and Color3.fromRGB(10,10,10) or Theme.TextWhite
         }):Play()
         if key == "showFov" or key == "enabled" then fovCircle.Visible = Aimbot.enabled and Aimbot.showFov end
-        if callback then callback(tableRef[key]) end
-    end)
+    end
+
+    btn.MouseButton1Click:Connect(ToggleState)
+
+    -- Sistema de asignación de teclas (Solo si es PC)
+    if isPC and bindKey then
+        local bindBtn = Instance.new("TextButton", row)
+        bindBtn.Size = UDim2.new(0, 40, 1, 0)
+        bindBtn.Position = UDim2.new(1, -40, 0, 0)
+        bindBtn.BackgroundColor3 = Theme.Separator
+        bindBtn.Text = Keybinds[bindKey] and "["..Keybinds[bindKey].Name.."]" or "[+]"
+        bindBtn.Font = Enum.Font.Gotham
+        bindBtn.TextSize = 10
+        bindBtn.TextColor3 = Theme.NeonGreen
+        Instance.new("UICorner", bindBtn).CornerRadius = UDim.new(0, 6)
+
+        bindBtn.MouseButton1Click:Connect(function()
+            if isBinding then return end
+            isBinding = true
+            bindBtn.Text = "[...]"
+            local conn
+            conn = UserInputService.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.Keyboard then
+                    local keycode = input.KeyCode
+                    if keycode == Enum.KeyCode.Escape or keycode == Enum.KeyCode.Backspace then
+                        Keybinds[bindKey] = nil
+                        bindBtn.Text = "[+]"
+                    else
+                        Keybinds[bindKey] = keycode
+                        bindBtn.Text = "["..keycode.Name.."]"
+                    end
+                    isBinding = false
+                    conn:Disconnect()
+                end
+            end)
+        end)
+    end
 end
+
+-- Input Maestro para activar las funciones configuradas
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed or isBinding or not isPC then return end
+    if input.UserInputType == Enum.UserInputType.Keyboard then
+        local k = input.KeyCode
+        
+        if k == Keybinds.MenuToggle then
+            MainContainer.Visible = not MainContainer.Visible
+            return
+        end
+
+        for bindKey, keycode in pairs(Keybinds) do
+            if k == keycode then
+                local parts = string.split(bindKey, "_")
+                local tableStr, varKey = parts[1], parts[2]
+                
+                local tbl = nil
+                if tableStr == "Aimbot" then tbl = Aimbot
+                elseif tableStr == "ESP" then tbl = ESP
+                elseif tableStr == "Teleport" then tbl = Teleport
+                elseif tableStr == "NoRecoil" then tbl = NoRecoil end
+
+                if tbl and varKey then
+                    tbl[varKey] = not tbl[varKey]
+                    -- Actualizar UI visualmente
+                    if ToggleUIElements[bindKey] then
+                        local btn = ToggleUIElements[bindKey]
+                        btn.BackgroundColor3 = tbl[varKey] and Theme.NeonGreen or Theme.ButtonBg
+                        btn.TextColor3 = tbl[varKey] and Color3.fromRGB(10,10,10) or Theme.TextWhite
+                    end
+                    if varKey == "showFov" or varKey == "enabled" then fovCircle.Visible = Aimbot.enabled and Aimbot.showFov end
+                end
+            end
+        end
+    end
+end)
 
 local function CreateSlider(parent, text, tableRef, key, min, max)
     local container = Instance.new("Frame", parent)
@@ -366,29 +462,73 @@ local TabMain = CreateTab("Main")
 local MainLeft = CreateColumn(TabMain, "Combat", 0)
 local MainRight = CreateColumn(TabMain, "Extras", 0.5)
 
-CreateToggle(MainLeft, "Habilitar Aimbot", Aimbot, "enabled")
-CreateToggle(MainLeft, "Silent Aim", Aimbot, "silentAim")
-CreateToggle(MainRight, "Auto TP (Jugador)", Teleport, "autoTpEnabled")
-CreateToggle(MainRight, "No Recoil", NoRecoil, "enabled")
+CreateToggle(MainLeft, "Habilitar Aimbot", Aimbot, "enabled", "Aimbot_enabled")
+CreateToggle(MainLeft, "Silent Aim", Aimbot, "silentAim", "Aimbot_silentAim")
+CreateToggle(MainRight, "Auto TP", Teleport, "autoTpEnabled", "Teleport_autoTpEnabled")
+CreateToggle(MainRight, "No Recoil", NoRecoil, "enabled", "NoRecoil_enabled")
 
 local TabVis = CreateTab("Visuals")
 local VisLeft = CreateColumn(TabVis, "ESP Menu", 0)
 local VisRight = CreateColumn(TabVis, "Settings", 0.5)
 
-CreateToggle(VisLeft, "ESP Nombre/Dist", ESP, "nameEnabled")
-CreateToggle(VisLeft, "ESP Líneas", ESP, "lineEnabled")
-CreateToggle(VisLeft, "ESP Esqueleto", ESP, "skeletonEnabled")
-CreateToggle(VisRight, "Mostrar FOV", Aimbot, "showFov")
+CreateToggle(VisLeft, "ESP Nombre/Dist", ESP, "nameEnabled", "ESP_nameEnabled")
+CreateToggle(VisLeft, "ESP Líneas", ESP, "lineEnabled", "ESP_lineEnabled")
+CreateToggle(VisLeft, "ESP Esqueleto", ESP, "skeletonEnabled", "ESP_skeletonEnabled")
+CreateToggle(VisRight, "Mostrar FOV", Aimbot, "showFov", nil)
 CreateSlider(VisRight, "Radio FOV", Aimbot, "fov", 10, 600)
 
 local TabConf = CreateTab("CONF")
 local ConfLeft = CreateColumn(TabConf, "Checks", 0)
 local ConfRight = CreateColumn(TabConf, "Ajustes Aim", 0.5)
 
-CreateToggle(ConfLeft, "Team Check", Aimbot, "teamCheck")
-CreateToggle(ConfLeft, "Wall Check", Aimbot, "wallCheck")
-CreateSlider(ConfRight, "Suavidad", Aimbot, "smoothness", 1, 100)
+CreateToggle(ConfLeft, "Team Check", Aimbot, "teamCheck", nil)
+CreateToggle(ConfLeft, "Wall Check", Aimbot, "wallCheck", nil)
+CreateSlider(ConfRight, "Suavidad Aim", Aimbot, "smoothness", 1, 100)
 CreateSlider(ConfRight, "Distancia AutoTP", Teleport, "distanceBehind", 1, 15)
+
+-- Bind especial para abrir/cerrar menú
+if isPC then
+    local menuBindRow = Instance.new("Frame", ConfLeft)
+    menuBindRow.Size = UDim2.new(1, 0, 0, 32)
+    menuBindRow.BackgroundTransparency = 1
+    
+    local lblBind = Instance.new("TextLabel", menuBindRow)
+    lblBind.Size = UDim2.new(0.6, 0, 1, 0)
+    lblBind.BackgroundTransparency = 1
+    lblBind.Text = "Tecla Menú:"
+    lblBind.TextColor3 = Theme.TextWhite
+    lblBind.Font = Enum.Font.GothamBold
+    lblBind.TextSize = 12
+    lblBind.TextXAlignment = Enum.TextXAlignment.Left
+
+    local bindBtnMenu = Instance.new("TextButton", menuBindRow)
+    bindBtnMenu.Size = UDim2.new(0.4, 0, 1, 0)
+    bindBtnMenu.Position = UDim2.new(0.6, 0, 0, 0)
+    bindBtnMenu.BackgroundColor3 = Theme.Separator
+    bindBtnMenu.Text = "["..Keybinds.MenuToggle.Name.."]"
+    bindBtnMenu.Font = Enum.Font.Gotham
+    bindBtnMenu.TextSize = 10
+    bindBtnMenu.TextColor3 = Theme.NeonGreen
+    Instance.new("UICorner", bindBtnMenu).CornerRadius = UDim.new(0, 6)
+
+    bindBtnMenu.MouseButton1Click:Connect(function()
+        if isBinding then return end
+        isBinding = true
+        bindBtnMenu.Text = "[...]"
+        local conn
+        conn = UserInputService.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Keyboard then
+                local keycode = input.KeyCode
+                if keycode ~= Enum.KeyCode.Escape and keycode ~= Enum.KeyCode.Backspace then
+                    Keybinds.MenuToggle = keycode
+                    bindBtnMenu.Text = "["..keycode.Name.."]"
+                end
+                isBinding = false
+                conn:Disconnect()
+            end
+        end)
+    end)
+end
 
 SwitchTab("Main")
 
@@ -415,17 +555,27 @@ end)
 -- ==========================================
 -- MAIN LOOPS
 -- ==========================================
+local targetLock = nil
+
 RunService.Heartbeat:Connect(function()
-    -- Auto TP
+    -- Lógica Auto TP Mejorada (Evita Flinging y Glitches de Física)
     if Teleport.autoTpEnabled then
-        local tpTarget = GetClosestPlayerDistance()
-        if tpTarget and tpTarget.Character then
-            local targetRoot = tpTarget.Character:FindFirstChild("HumanoidRootPart")
+        if not targetLock or not IsValidTarget(targetLock, true) then
+            targetLock = GetClosestPlayerDistance() -- Buscar nuevo si muere o nos alejamos mucho
+        end
+
+        if targetLock and targetLock.Character then
+            local targetRoot = targetLock.Character:FindFirstChild("HumanoidRootPart")
             local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             if targetRoot and myRoot then
-                myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, Teleport.distanceBehind)
+                -- Teletransporta detrás y un poco arriba, anula la velocidad para evitar salir volando
+                myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 1.5, Teleport.distanceBehind)
+                myRoot.AssemblyLinearVelocity = Vector3.zero 
+                myRoot.AssemblyAngularVelocity = Vector3.zero
             end
         end
+    else
+        targetLock = nil
     end
 
     -- Silent Aim
@@ -467,7 +617,7 @@ RunService.RenderStepped:Connect(function()
 
     -- Render ESP
     for _, player in ipairs(Players:GetPlayers()) do
-        if not IsValidTarget(player) then ClearPlayerESP(player); continue end
+        if not IsValidTarget(player, true) then ClearPlayerESP(player); continue end
         if not ESP_Drawings[player] then createDrawings(player) end
         
         local drawings = ESP_Drawings[player]
