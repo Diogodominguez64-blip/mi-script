@@ -15,7 +15,7 @@ local State = getgenv().XenoDeltaScript
 -- Settings
 local Settings = {
     ESP = { Enabled = true, MaxDist = 500, TeamCheck = true, TracerOrigin = "Bottom" },
-    Aimbot = { Enabled = true, FOV = 150, Smooth = 0.15, Bone = "Head", Hotkey = Enum.UserInputType.MouseButton2, TeamCheck = true, VisCheck = true },
+    Aimbot = { Enabled = true, FOV = 150, Smooth = 15, Bone = "Head", Hotkey = Enum.KeyCode.ButtonL2, TeamCheck = true, VisCheck = true, ToggleMode = false },
     AutoShoot = { Enabled = true },
     Misc = { AntiAFK = true }
 }
@@ -45,7 +45,7 @@ local function LoadConfig()
 end
 LoadConfig()
 
--- Hookmetamethod (Basic passthrough to prevent basic detections)
+-- Hookmetamethod
 local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     if checkcaller() or State.Unloaded then return oldNamecall(self, ...) end
@@ -57,14 +57,70 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "XenoDeltaHUD"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset = true
 ScreenGui.Parent = game:GetService("CoreGui")
 State.GUI = ScreenGui
 
+-- Floating Button (Mobile + PC)
+local FloatingBtn = Instance.new("TextButton")
+FloatingBtn.Size = UDim2.new(0, 50, 0, 50)
+FloatingBtn.Position = UDim2.new(0, 20, 0.5, -25)
+FloatingBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+FloatingBtn.Text = "XD"
+FloatingBtn.TextColor3 = Color3.fromRGB(0, 255, 255)
+FloatingBtn.TextSize = 16
+FloatingBtn.Font = Enum.Font.GothamBold
+FloatingBtn.BorderSizePixel = 0
+FloatingBtn.Parent = ScreenGui
+FloatingBtn.AutoButtonColor = false
+
+local FloatCorner = Instance.new("UICorner")
+FloatCorner.CornerRadius = UDim.new(1, 0)
+FloatCorner.Parent = FloatingBtn
+
+local FloatStroke = Instance.new("UIStroke")
+FloatStroke.Color = Color3.fromRGB(0, 255, 255)
+FloatStroke.Thickness = 2
+FloatStroke.Parent = FloatingBtn
+
+-- Drag Floating Button
+local fDragging, fDragInput, fDragStart, fStartPos
+FloatingBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        fDragging = true
+        fDragStart = input.Position
+        fStartPos = FloatingBtn.Position
+        local moveConn
+        moveConn = input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                fDragging = false
+                moveConn:Disconnect()
+            end
+        end)
+    end
+end)
+FloatingBtn.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        fDragInput = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == fDragInput and fDragging then
+        local delta = input.Position - fDragStart
+        FloatingBtn.Position = UDim2.new(
+            fStartPos.X.Scale, fStartPos.X.Offset + delta.X,
+            fStartPos.Y.Scale, fStartPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- Main Frame (hidden initially)
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 450, 0, 300)
-MainFrame.Position = UDim2.new(0.5, -225, 0.5, -150)
+MainFrame.Size = UDim2.new(0, 450, 0, 320)
+MainFrame.Position = UDim2.new(0.5, -225, 0.5, -160)
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
 MainFrame.BorderSizePixel = 0
+MainFrame.Visible = false
 MainFrame.Parent = ScreenGui
 
 local UICorner = Instance.new("UICorner")
@@ -87,29 +143,55 @@ TopBarCorner.CornerRadius = UDim.new(0, 6)
 TopBarCorner.Parent = TopBar
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(0, 150, 1, 0)
+Title.Size = UDim2.new(0, 200, 1, 0)
 Title.Position = UDim2.new(0, 10, 0, 0)
 Title.BackgroundTransparency = 1
 Title.Text = "Xeno / Delta Hub"
 Title.TextColor3 = Color3.fromRGB(0, 255, 255)
 Title.TextSize = 14
 Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = TopBar
 
--- Dragging
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0, 0)
+CloseBtn.BackgroundTransparency = 1
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
+CloseBtn.TextSize = 16
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.Parent = TopBar
+
+-- Toggle GUI
+local function ToggleGUI()
+    MainFrame.Visible = not MainFrame.Visible
+    FloatingBtn.Visible = not MainFrame.Visible
+end
+
+FloatingBtn.MouseButton1Click:Connect(ToggleGUI)
+CloseBtn.MouseButton1Click:Connect(ToggleGUI)
+
+-- Dragging MainFrame
 local dragging, dragInput, dragStart, startPos
 TopBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
         dragStart = input.Position
         startPos = MainFrame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        local moveConn
+        moveConn = input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+                moveConn:Disconnect()
+            end
         end)
     end
 end)
 TopBar.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
 end)
 UserInputService.InputChanged:Connect(function(input)
     if input == dragInput and dragging then
@@ -148,13 +230,20 @@ local function CreateTabButton(name, index)
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
     
     local frame = Instance.new("ScrollingFrame")
-    frame.Size = UDim2.new(1, 0, 1, 0)
+    frame.Size = UDim2.new(1, -10, 1, 0)
     frame.BackgroundTransparency = 1
     frame.BorderSizePixel = 0
     frame.ScrollBarThickness = 3
     frame.ScrollBarImageColor3 = Color3.fromRGB(0, 255, 255)
+    frame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    frame.AutomaticCanvasSize = Enum.AutomaticSize.Y
     frame.Visible = (index == 1)
     frame.Parent = ContentContainer
+    
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 4)
+    layout.Parent = frame
     tabFrames[name] = frame
     
     btn.MouseButton1Click:Connect(function()
@@ -178,10 +267,11 @@ end
 for i, name in ipairs(tabs) do CreateTabButton(name, i) end
 
 -- UI Elements Helper
-local function CreateToggle(parent, text, settingTable, settingKey)
+local function CreateToggle(parent, text, settingTable, settingKey, order)
     local container = Instance.new("Frame")
     container.Size = UDim2.new(1, -10, 0, 30)
     container.BackgroundTransparency = 1
+    container.LayoutOrder = order or 0
     container.Parent = parent
     
     local label = Instance.new("TextLabel")
@@ -210,10 +300,11 @@ local function CreateToggle(parent, text, settingTable, settingKey)
     end)
 end
 
-local function CreateSlider(parent, text, settingTable, settingKey, min, max)
+local function CreateSlider(parent, text, settingTable, settingKey, min, max, order)
     local container = Instance.new("Frame")
     container.Size = UDim2.new(1, -10, 0, 40)
     container.BackgroundTransparency = 1
+    container.LayoutOrder = order or 0
     container.Parent = parent
     
     local label = Instance.new("TextLabel")
@@ -242,38 +333,89 @@ local function CreateSlider(parent, text, settingTable, settingKey, min, max)
     Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
     
     local draggingSlider = false
+    local function updateSlider(input)
+        local relX = math.clamp((input.Position.X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1)
+        fill.Size = UDim2.new(relX, 0, 1, 0)
+        local val = math.floor(min + (max - min) * relX)
+        settingTable[settingKey] = val
+        label.Text = text .. ": " .. val
+        SaveConfig()
+    end
+    
     bg.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingSlider = true end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            draggingSlider = true
+            updateSlider(input)
+        end
     end)
-    UserInputService.InputChanged:Connect(function(input)
-        if draggingSlider and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local relX = math.clamp((input.Position.X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1)
-            fill.Size = UDim2.new(relX, 0, 1, 0)
-            local val = math.floor(min + (max - min) * relX)
-            settingTable[settingKey] = val
-            label.Text = text .. ": " .. val
-            SaveConfig()
+    local moveConn
+    moveConn = UserInputService.InputChanged:Connect(function(input)
+        if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            updateSlider(input)
         end
     end)
     UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingSlider = false end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            draggingSlider = false
+        end
+    end)
+    table.insert(State.Connections, moveConn)
+end
+
+local function CreateDropdown(parent, text, settingTable, settingKey, options, order)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(1, -10, 0, 30)
+    container.BackgroundTransparency = 1
+    container.LayoutOrder = order or 0
+    container.Parent = parent
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.5, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.TextSize = 13
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = container
+    
+    local dropBtn = Instance.new("TextButton")
+    dropBtn.Size = UDim2.new(0.45, 0, 1, 0)
+    dropBtn.Position = UDim2.new(0.55, 0, 0, 0)
+    dropBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    dropBtn.TextColor3 = Color3.fromRGB(0, 255, 255)
+    dropBtn.Text = tostring(settingTable[settingKey])
+    dropBtn.TextSize = 12
+    dropBtn.Font = Enum.Font.GothamSemibold
+    dropBtn.BorderSizePixel = 0
+    dropBtn.Parent = container
+    Instance.new("UICorner", dropBtn).CornerRadius = UDim.new(0, 4)
+    
+    dropBtn.MouseButton1Click:Connect(function()
+        local currentIdx = table.find(options, settingTable[settingKey]) or 1
+        local nextIdx = (currentIdx % #options) + 1
+        settingTable[settingKey] = options[nextIdx]
+        dropBtn.Text = tostring(settingTable[settingKey])
+        SaveConfig()
     end)
 end
 
 -- Populate Tabs
-CreateToggle(tabFrames["Visuals"], "ESP Enabled", Settings.ESP, "Enabled")
-CreateToggle(tabFrames["Visuals"], "Team Check", Settings.ESP, "TeamCheck")
-CreateSlider(tabFrames["Visuals"], "Max Distance", Settings.ESP, "MaxDist", 100, 2000)
+CreateToggle(tabFrames["Visuals"], "ESP Enabled", Settings.ESP, "Enabled", 1)
+CreateToggle(tabFrames["Visuals"], "Team Check", Settings.ESP, "TeamCheck", 2)
+CreateSlider(tabFrames["Visuals"], "Max Distance", Settings.ESP, "MaxDist", 100, 2000, 3)
 
-CreateToggle(tabFrames["Combat"], "Aimbot Enabled", Settings.Aimbot, "Enabled")
-CreateToggle(tabFrames["Combat"], "Team Check", Settings.Aimbot, "TeamCheck")
-CreateToggle(tabFrames["Combat"], "Visibility Check", Settings.Aimbot, "VisCheck")
-CreateSlider(tabFrames["Combat"], "FOV Radius", Settings.Aimbot, "FOV", 50, 500)
-CreateSlider(tabFrames["Combat"], "Smoothing", Settings.Aimbot, "Smooth", 0, 100) -- Divided by 100 in logic
+CreateToggle(tabFrames["Combat"], "Aimbot Enabled", Settings.Aimbot, "Enabled", 1)
+CreateToggle(tabFrames["Combat"], "Team Check", Settings.Aimbot, "TeamCheck", 2)
+CreateToggle(tabFrames["Combat"], "Visibility Check", Settings.Aimbot, "VisCheck", 3)
+CreateToggle(tabFrames["Combat"], "Toggle Mode (Mobile)", Settings.Aimbot, "ToggleMode", 4)
+CreateSlider(tabFrames["Combat"], "FOV Radius", Settings.Aimbot, "FOV", 50, 500, 5)
+CreateSlider(tabFrames["Combat"], "Smoothing", Settings.Aimbot, "Smooth", 0, 100, 6)
+CreateDropdown(tabFrames["Combat"], "Target Bone", Settings.Aimbot, "Bone", {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"}, 7)
 
-CreateToggle(tabFrames["Combat"], "Auto Shoot", Settings.AutoShoot, "Enabled")
+CreateToggle(tabFrames["Combat"], "Auto Shoot", Settings.AutoShoot, "Enabled", 8)
 
-CreateToggle(tabFrames["Misc"], "Anti AFK", Settings.Misc, "AntiAFK")
+CreateToggle(tabFrames["Misc"], "Anti AFK", Settings.Misc, "AntiAFK", 1)
 
 local unloadBtn = Instance.new("TextButton")
 unloadBtn.Size = UDim2.new(1, -10, 0, 30)
@@ -282,17 +424,18 @@ unloadBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 unloadBtn.Text = "Unload Script"
 unloadBtn.Font = Enum.Font.GothamBold
 unloadBtn.BorderSizePixel = 0
+unloadBtn.LayoutOrder = 2
 unloadBtn.Parent = tabFrames["Misc"]
 Instance.new("UICorner", unloadBtn).CornerRadius = UDim.new(0, 4)
 
 local copyBtn = Instance.new("TextButton")
 copyBtn.Size = UDim2.new(1, -10, 0, 30)
-copyBtn.Position = UDim2.new(0, 0, 0, 35)
 copyBtn.BackgroundColor3 = Color3.fromRGB(0, 255, 255)
 copyBtn.TextColor3 = Color3.fromRGB(15, 15, 20)
 copyBtn.Text = "Copy Config to Clipboard"
 copyBtn.Font = Enum.Font.GothamBold
 copyBtn.BorderSizePixel = 0
+copyBtn.LayoutOrder = 3
 copyBtn.Parent = tabFrames["Misc"]
 Instance.new("UICorner", copyBtn).CornerRadius = UDim.new(0, 4)
 copyBtn.MouseButton1Click:Connect(function()
@@ -365,6 +508,8 @@ FOVCircle.Transparency = 0.5
 FOVCircle.Visible = false
 table.insert(State.Drawings, FOVCircle)
 
+local aimbotToggled = false
+
 local function GetBonePosition(character, boneName)
     local part = character:FindFirstChild(boneName)
     if not part then part = character:FindFirstChild("Head") end
@@ -374,7 +519,7 @@ end
 local function IsVisible(targetPart)
     if not Settings.Aimbot.VisCheck then return true end
     local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
     rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
     
     local success, result = pcall(function()
@@ -396,7 +541,7 @@ local function GetTarget()
         if player ~= LocalPlayer and player.Character then
             if Settings.Aimbot.TeamCheck and player.Team == LocalPlayer.Team then continue end
             
-            local humanoid = player.Character:FindFirstChild("Humanoid")
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
             if not humanoid or humanoid.Health <= 0 then continue end
             
             local part = GetBonePosition(player.Character, Settings.Aimbot.Bone)
@@ -417,6 +562,16 @@ local function GetTarget()
     return closest
 end
 
+-- Hotkey handling (PC + Mobile gamepad/touch toggle)
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Settings.Aimbot.Hotkey or input.UserInputType == Settings.Aimbot.Hotkey then
+        if Settings.Aimbot.ToggleMode then
+            aimbotToggled = not aimbotToggled
+        end
+    end
+end)
+
 -- Main Loop
 local renderConn = RunService.RenderStepped:Connect(function()
     if State.Unloaded then return end
@@ -433,7 +588,7 @@ local renderConn = RunService.RenderStepped:Connect(function()
         
         local hrp = player.Character:FindFirstChild("HumanoidRootPart")
         local head = player.Character:FindFirstChild("Head")
-        local humanoid = player.Character:FindFirstChild("Humanoid")
+        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
         
         if not hrp or not head or not humanoid or humanoid.Health <= 0 then
             for _, drawing in pairs(esp) do drawing.Visible = false end
@@ -455,21 +610,17 @@ local renderConn = RunService.RenderStepped:Connect(function()
         local rootPos = Camera:WorldToViewportPoint(hrp.Position)
         
         if onScreen then
-            local scale = math.clamp(1 / (dist * 0.01), 0.5, 2)
-            local height = headPos.Y - rootPos.Y
+            local height = math.abs(headPos.Y - rootPos.Y)
             local width = height * 0.6
             
-            -- Box
             esp.Box.Size = Vector2.new(width, height)
             esp.Box.Position = Vector2.new(headPos.X - width / 2, headPos.Y)
             esp.Box.Visible = true
             
-            -- Name
             esp.Name.Text = player.Name
             esp.Name.Position = Vector2.new(headPos.X, headPos.Y - 15)
             esp.Name.Visible = true
             
-            -- Health Bar
             local hpPercent = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
             esp.HealthBG.From = Vector2.new(headPos.X - width / 2 - 5, headPos.Y)
             esp.HealthBG.To = Vector2.new(headPos.X - width / 2 - 5, headPos.Y + height)
@@ -480,12 +631,10 @@ local renderConn = RunService.RenderStepped:Connect(function()
             esp.HealthBar.Color = Color3.fromRGB(255 * (1 - hpPercent), 255 * hpPercent, 0)
             esp.HealthBar.Visible = true
             
-            -- Distance
             esp.Distance.Text = math.floor(dist) .. "m"
             esp.Distance.Position = Vector2.new(headPos.X, headPos.Y + height + 5)
             esp.Distance.Visible = true
             
-            -- Tracer
             local screenSize = Camera.ViewportSize
             esp.Tracer.From = Vector2.new(screenSize.X / 2, screenSize.Y)
             esp.Tracer.To = Vector2.new(headPos.X, headPos.Y + height)
@@ -496,7 +645,9 @@ local renderConn = RunService.RenderStepped:Connect(function()
     end
     
     -- Aimbot Update
-    local aimbotActive = Settings.Aimbot.Enabled and UserInputService:IsMouseButtonPressed(Settings.Aimbot.Hotkey)
+    local hotkeyDown = UserInputService:IsKeyDown(Settings.Aimbot.Hotkey) or UserInputService:IsMouseButtonPressed(Settings.Aimbot.Hotkey)
+    local aimbotActive = Settings.Aimbot.Enabled and (hotkeyDown or (Settings.Aimbot.ToggleMode and aimbotToggled))
+    
     FOVCircle.Visible = Settings.Aimbot.Enabled
     FOVCircle.Radius = Settings.Aimbot.FOV
     FOVCircle.Position = UserInputService:GetMouseLocation()
@@ -514,9 +665,8 @@ local renderConn = RunService.RenderStepped:Connect(function()
             local newCFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + Vector3.new(delta.X, -delta.Y, 1))
             Camera.CFrame = Camera.CFrame:Lerp(newCFrame, smoothFactor)
             
-            -- Auto Shoot
             if Settings.AutoShoot.Enabled then
-                -- TODO: Fire weapon remote here
+                -- TODO: Fire weapon remote here (game-specific)
                 pcall(function()
                     VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
                     VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
@@ -544,7 +694,7 @@ end)
 table.insert(State.Connections, antiAfkConn)
 
 -- Unload Function
-unloadBtn.MouseButton1Click:Connect(function()
+local function Unload()
     State.Unloaded = true
     for _, conn in pairs(State.Connections) do
         pcall(function() conn:Disconnect() end)
@@ -557,11 +707,13 @@ unloadBtn.MouseButton1Click:Connect(function()
     end
     pcall(function() ScreenGui:Destroy() end)
     getgenv().XenoDeltaScript = nil
-end)
+end
 
--- Cleanup connections on script re-execution
-local function cleanupOldInstances()
-    if getgenv().XenoDeltaScript and not getgenv().XenoDeltaScript.Unloaded then
+unloadBtn.MouseButton1Click:Connect(Unload)
+
+-- Cleanup previous instance if re-executed
+pcall(function()
+    if getgenv().XenoDeltaScript and getgenv().XenoDeltaScript ~= State and not getgenv().XenoDeltaScript.Unloaded then
         getgenv().XenoDeltaScript.Unloaded = true
         for _, conn in pairs(getgenv().XenoDeltaScript.Connections) do
             pcall(function() conn:Disconnect() end)
@@ -571,6 +723,4 @@ local function cleanupOldInstances()
         end
         pcall(function() getgenv().XenoDeltaScript.GUI:Destroy() end)
     end
-end
--- Note: Since we already set State at the top, this is just a safeguard if the script is injected twice without unloading.
--- The actual cleanup is handled by the Unload button and the initial State assignment.
+end)
