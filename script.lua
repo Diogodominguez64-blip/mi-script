@@ -26,6 +26,8 @@
     Re-execution safe: the previous instance tears itself down on load.
 ]]
 
+print("[hs_menu] boot 1/3: chunk start")
+
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -139,12 +141,23 @@ end
 --=====================================================================
 -- Menu root (the only ScreenGui in this build)
 --=====================================================================
-local function rootParent()
-    local ok, hui = pcall(function() return gethui and gethui() end)
-    if ok and hui then return hui end
-    local ok2, cg = pcall(function() return game:GetService("CoreGui") end)
-    if ok2 and cg then return cg end
-    return LP:WaitForChild("PlayerGui")
+-- Every parent below is attempted in order and inside pcall: an executor that
+-- refuses CoreGui must not take the whole script down with it.
+local function parentGui(g)
+    local sources = {
+        function() return gethui and gethui() end,
+        function() return game:GetService("CoreGui") end,
+        function() return LP:WaitForChild("PlayerGui", 10) end,
+    }
+    for _, src in ipairs(sources) do
+        local ok, parent = pcall(src)
+        if ok and parent then
+            if pcall(function() g.Parent = parent end) then
+                return true
+            end
+        end
+    end
+    return false
 end
 
 local Gui = new("ScreenGui", {
@@ -157,7 +170,9 @@ local Gui = new("ScreenGui", {
 pcall(function()
     if syn and syn.protect_gui then syn.protect_gui(Gui) end
 end)
-Gui.Parent = rootParent()
+if not parentGui(Gui) then
+    print("[hs_menu] boot failed: no gui parent")
+end
 
 local Theme = {
     bg     = Color3.fromRGB(18, 18, 22),
@@ -458,6 +473,8 @@ CloseBtn.MouseButton1Click:Connect(function()
     setPanel(false)
 end)
 
+print("[hs_menu] boot 2/3: gui built")
+
 --=====================================================================
 -- FOV ring (menu overlay, not part of the ESP)
 --=====================================================================
@@ -585,7 +602,9 @@ local function isAlive(model, root)
 
     -- A missing or zero health value is not proof of death here: mobs are
     -- pooled and re-used, and Humanoid health is not the source of truth.
-    return root.Transparency < 0.98
+    local tr = root.Transparency
+    if typeof(tr) ~= "number" then tr = 0 end
+    return tr < 0.98
 end
 
 local function modelSize(model, fallback)
@@ -665,8 +684,10 @@ local function scan()
     local function add(model, kind, plr)
         if #out >= MAX_TARGETS then return end
         if seen[model] then return end
-        local t = describe(model, kind, plr, mine)
-        if t then
+        -- One malformed or half-replicated model must not blank the whole scan
+        -- for the frame, so every describe() call is contained.
+        local ok, t = pcall(describe, model, kind, plr, mine)
+        if ok and t then
             seen[model] = true
             out[#out + 1] = t
         end
@@ -1289,7 +1310,12 @@ local function applyCameraAim(dt)
     cam.CFrame = cam.CFrame:Lerp(goal, a)
 end
 
-RunService:BindToRenderStep(AIM_BIND, Enum.RenderPriority.Camera.Value + 1, applyCameraAim)
+local aimBound = pcall(function()
+    RunService:BindToRenderStep(AIM_BIND, Enum.RenderPriority.Camera.Value + 1, applyCameraAim)
+end)
+if not aimBound then
+    print("[hs_menu] BindToRenderStep refused, camera aim falls back to RenderStepped")
+end
 
 --=====================================================================
 -- Menu contents
@@ -1381,6 +1407,9 @@ bind(RunService.RenderStepped, function(dt)
     local list = scanThrottled()
     renderEsp(list)
     runAimbot(list, dt)
+    if not aimBound then
+        applyCameraAim(dt)
+    end
 
     statusClock = statusClock + dt
     if statusClock >= 0.5 then
@@ -1443,8 +1472,14 @@ end
 syncFov()
 
 -- Install the shot hook up front so the status counters report immediately;
--- it falls through to the real function while shots are not armed.
-installSilent()
+-- it falls through to the real function while shots are not armed. Spawned so
+-- a slow or yielding require() cannot hold up the rest of the boot.
+task.spawn(function()
+    local ok, err = pcall(installSilent)
+    if not ok then
+        print("[hs_menu] silent install failed: " .. tostring(err))
+    end
+end)
 
 --=====================================================================
 -- Unload
@@ -1473,6 +1508,14 @@ local function unload()
 
     pcall(function() Gui:Destroy() end)
     _G.__hs_menu = nil
+    _G.__hs = nil
 end
 
-_G.__hs_menu = { unload = unload, config = Config 
+_G.__hs_menu = {
+    unload = unload,
+    config = Config,
+    stats = function() return Silent.hits, Silent.calls, Silent.installed end,
+}
+_G.__hs = _G.__hs_menu
+if getgenv then pcall(function() getgenv().__hs_menu = _G.__hs_menu end) end
+print("[hs_menu] boot 3/3: ready")
