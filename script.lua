@@ -1,7 +1,10 @@
 --[[
-    Hypershot mobile menu — FOV / Aimbot / ESP
-    Executor: any (Synapse, Delta, Codex, Fluxus, Wave). No Drawing API required.
+    Hypershot mobile menu - FOV / Aimbot / ESP
+    Language: Luau (Roblox Lua). Single file, executor-side. No Drawing API required.
+    Executor: Synapse, Delta, Codex, Fluxus, Wave, Solara, AWP.
     Re-execution safe: previous instance is torn down on load.
+
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/<you>/<repo>/main/hs_menu.lua"))()
 ]]
 
 local Players          = game:GetService("Players")
@@ -22,12 +25,12 @@ end
 local Config = {
     -- aimbot
     aimEnabled   = false,
-    aimFov        = 140,     -- pixels, radius from viewport centre
-    aimSmooth     = 14,      -- higher = snappier
-    aimPart       = "Head",  -- "Head" | "HumanoidRootPart" | "UpperTorso"
-    aimTeamCheck  = true,
-    aimWallCheck  = true,
-    aimMaxDist    = 600,
+    aimFov       = 140,     -- pixels, radius from viewport centre
+    aimSmooth    = 14,      -- higher = snappier
+    aimPart      = "Head",  -- "Head" | "HumanoidRootPart" | "UpperTorso"
+    aimTeamCheck = true,
+    aimWallCheck = true,
+    aimMaxDist   = 600,
     -- esp
     espEnabled    = true,
     espBox        = true,
@@ -40,8 +43,8 @@ local Config = {
     espColor      = Color3.fromRGB(120, 200, 255),
     espEnemyColor = Color3.fromRGB(255, 70, 70),
     -- fov
-    fovVisible    = true,
-    fovColor      = Color3.fromRGB(255, 255, 255),
+    fovVisible = true,
+    fovColor   = Color3.fromRGB(255, 255, 255),
 }
 
 local MENU_KEY = Enum.KeyCode.RightShift
@@ -76,14 +79,6 @@ local function raycastParams(exclude)
     p.IgnoreWater = true
     return p
 end
-
--- RaycastFilterType.Blacklist on older builds
-pcall(function()
-    local p = RaycastParams.new()
-    p.FilterType = Enum.RaycastFilterType.Exclude
-end) or pcall(function()
-    Config.__legacyRay = true
-end)
 
 local function makeDraggable(frame, handle)
     local dragging, dragStart, startPos = false, nil, nil
@@ -138,17 +133,20 @@ end)
 Gui.Parent = rootParent()
 
 --=====================================================================
--- Widgets
+-- Theme
 --=====================================================================
 local Theme = {
-    bg      = Color3.fromRGB(18, 18, 22),
-    panel   = Color3.fromRGB(26, 26, 32),
-    row     = Color3.fromRGB(34, 34, 42),
-    accent  = Color3.fromRGB(120, 200, 255),
-    text    = Color3.fromRGB(232, 232, 238),
-    dim     = Color3.fromRGB(150, 150, 160),
+    bg     = Color3.fromRGB(18, 18, 22),
+    panel  = Color3.fromRGB(26, 26, 32),
+    row    = Color3.fromRGB(34, 34, 42),
+    accent = Color3.fromRGB(120, 200, 255),
+    text   = Color3.fromRGB(232, 232, 238),
+    dim    = Color3.fromRGB(150, 150, 160),
 }
 
+--=====================================================================
+-- Widgets
+--=====================================================================
 local function makeToggle(parent, text, default, callback)
     local row = new("Frame", {
         Size = UDim2.new(1, 0, 0, 30),
@@ -156,7 +154,7 @@ local function makeToggle(parent, text, default, callback)
         BackgroundTransparency = 0.35,
         BorderSizePixel = 0,
         Parent = parent,
-    }, parent)
+    })
     corner(row, 6)
 
     new("TextLabel", {
@@ -213,7 +211,7 @@ local function makeSlider(parent, text, min, max, default, decimals, callback)
     }, parent)
     corner(row, 6)
 
-    local label = new("TextLabel", {
+    new("TextLabel", {
         Size = UDim2.new(0.6, 0, 0, 20),
         Position = UDim2.fromOffset(10, 4),
         BackgroundTransparency = 1,
@@ -383,7 +381,7 @@ local CloseBtn = new("TextButton", {
     Size = UDim2.fromOffset(28, 28),
     Position = UDim2.new(1, -36, 0.5, -14),
     BackgroundColor3 = Color3.fromRGB(48, 48, 58),
-    Text = "×",
+    Text = "x",
     Font = Enum.Font.GothamBold,
     TextSize = 18,
     TextColor3 = Theme.text,
@@ -452,7 +450,6 @@ end
 -- Recognition pass (server-replicated state + client visibility)
 --=====================================================================
 local Recognition = {}
-Recognition.cache = {}
 
 local function getTeam(plr)
     local t = plr.Team
@@ -481,7 +478,8 @@ local function getAimPart(char, mode)
     if mode == "Head" then
         return char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
     elseif mode == "UpperTorso" then
-        return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+        return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+            or char:FindFirstChild("HumanoidRootPart")
     end
     return char:FindFirstChild("HumanoidRootPart")
 end
@@ -545,14 +543,15 @@ local EspGui = new("ScreenGui", {
     IgnoreGuiInset = true,
     DisplayOrder = 9998,
 }, Gui)
+
 local TracerLayer = new("Frame", {
     Size = UDim2.fromScale(1, 1),
     BackgroundTransparency = 1,
     Visible = Config.espEnabled,
 }, EspGui)
 
-local espCache = {}   -- [Player] = {billboard=, box=, name=, hp=, hpFill=, dist=}
-local tracerPool = {}
+local espCache = {}    -- [Player] = { billboard, box, boxStroke, name, dist, hpFill }
+local tracerPool = {}  -- [Player] = Frame
 
 local function destroyEsp(plr)
     local e = espCache[plr]
@@ -618,11 +617,11 @@ local function buildEsp(plr, root)
 
     espCache[plr] = {
         billboard = bb,
-        box = box,
+        box       = box,
         boxStroke = boxStroke,
-        name = nameLabel,
-        dist = distLabel,
-        hpFill = hpFill,
+        name      = nameLabel,
+        dist      = distLabel,
+        hpFill    = hpFill,
     }
     return espCache[plr]
 end
@@ -662,30 +661,35 @@ local function renderEsp(snapshot)
             end
 
             local col = t.sameTeam and Config.espColor or Config.espEnemyColor
+            e.billboard.Enabled = true
+
             e.box.Visible = Config.espBox
             e.boxStroke.Color = col
             e.boxStroke.Transparency = 0.15
+
             e.name.Visible = Config.espName
             e.name.TextColor3 = col
             e.name.Text = t.player.Name
+
             e.dist.Visible = Config.espDistance
             e.dist.Text = string.format("%d m", math.floor(t.dist))
-            e.hpFill.Parent.Visible = Config.espHealth
-            e.hpFill.Size = UDim2.new(1, 0, math.clamp(t.hum.Health / math.max(t.hum.MaxHealth, 1), 0, 1), 0)
-            e.hpFill.BackgroundColor3 = Color3.fromRGB(
-                math.floor(255 * (1 - t.hum.Health / math.max(t.hum.MaxHealth, 1))),
-                math.floor(230 * (t.hum.Health / math.max(t.hum.MaxHealth, 1))), 110)
 
-            -- tracer (mobile-safe: rotated ScreenGui frame)
+            local hpFrac = math.clamp(t.hum.Health / math.max(t.hum.MaxHealth, 1), 0, 1)
+            e.hpFill.Parent.Visible = Config.espHealth
+            e.hpFill.Size = UDim2.new(1, 0, hpFrac, 0)
+            e.hpFill.BackgroundColor3 = Color3.fromRGB(
+                math.floor(255 * (1 - hpFrac)),
+                math.floor(230 * hpFrac),
+                110)
+
             local tr = tracerFor(t.player)
             if Config.espTracer then
                 local origin = Vector2.new(vp.X * 0.5, vp.Y)
                 local delta = t.screen - origin
-                local len = delta.Magnitude
                 tr.Visible = true
                 tr.BackgroundColor3 = col
                 tr.Position = UDim2.fromOffset(origin.X, origin.Y)
-                tr.Size = UDim2.fromOffset(len, 1)
+                tr.Size = UDim2.fromOffset(delta.Magnitude, 1)
                 tr.Rotation = math.deg(math.atan2(delta.Y, delta.X))
             else
                 tr.Visible = false
@@ -699,10 +703,8 @@ local function renderEsp(snapshot)
     end
 
     for plr, e in pairs(espCache) do
-        if not alive[plr] then
-            if e.billboard then e.billboard.Enabled = false end
-        else
-            if e.billboard then e.billboard.Enabled = true end
+        if e.billboard then
+            e.billboard.Enabled = alive[plr] == true
         end
     end
 end
@@ -710,8 +712,6 @@ end
 --=====================================================================
 -- Aimbot (camera CFrame, frame-rate independent)
 --=====================================================================
-local aimAlpha = 0
-
 local function pickTarget(snapshot)
     local cam = Workspace.CurrentCamera
     if not cam then return nil end
@@ -737,6 +737,7 @@ local function pickTarget(snapshot)
             end
         end
     end
+
     return best
 end
 
@@ -750,8 +751,7 @@ local function runAimbot(snapshot, dt)
 
     local goal = CFrame.lookAt(cam.CFrame.Position, target.part.Position)
     -- exponential smoothing: identical feel at 30 and 144 fps
-    local a = 1 - math.exp(-Config.aimSmooth * dt)
-    a = math.clamp(a, 0, 1)
+    local a = math.clamp(1 - math.exp(-Config.aimSmooth * dt), 0, 1)
     cam.CFrame = cam.CFrame:Lerp(goal, a)
 end
 
@@ -764,8 +764,8 @@ local function nextOrder()
     return order
 end
 
-local _, aimList = makeSection(Scroll, "Aimbot")
-aimList.LayoutOrder = nextOrder()
+local aimWrap, aimList = makeSection(Scroll, "Aimbot")
+aimWrap.LayoutOrder = nextOrder()
 makeToggle(aimList, "Enable aimbot", Config.aimEnabled, function(v) Config.aimEnabled = v end)
 makeSlider(aimList, "Aim FOV", 40, 500, Config.aimFov, nil, function(v) Config.aimFov = v; syncFov() end)
 makeSlider(aimList, "Smoothing", 2, 40, Config.aimSmooth, nil, function(v) Config.aimSmooth = v end)
@@ -773,9 +773,12 @@ makeSlider(aimList, "Max distance", 50, 1200, Config.aimMaxDist, nil, function(v
 makeToggle(aimList, "Team check", Config.aimTeamCheck, function(v) Config.aimTeamCheck = v end)
 makeToggle(aimList, "Wall check", Config.aimWallCheck, function(v) Config.aimWallCheck = v end)
 
-local _, espList = makeSection(Scroll, "ESP")
-espList.LayoutOrder = nextOrder()
-makeToggle(espList, "Enable ESP", Config.espEnabled, function(v) Config.espEnabled = v; TracerLayer.Visible = v end)
+local espWrap, espList = makeSection(Scroll, "ESP")
+espWrap.LayoutOrder = nextOrder()
+makeToggle(espList, "Enable ESP", Config.espEnabled, function(v)
+    Config.espEnabled = v
+    TracerLayer.Visible = v
+end)
 makeToggle(espList, "Box", Config.espBox, function(v) Config.espBox = v end)
 makeToggle(espList, "Name", Config.espName, function(v) Config.espName = v end)
 makeToggle(espList, "Health", Config.espHealth, function(v) Config.espHealth = v end)
@@ -784,9 +787,12 @@ makeToggle(espList, "Tracer", Config.espTracer, function(v) Config.espTracer = v
 makeToggle(espList, "Team check", Config.espTeamCheck, function(v) Config.espTeamCheck = v end)
 makeSlider(espList, "Max distance", 100, 2000, Config.espMaxDist, nil, function(v) Config.espMaxDist = v end)
 
-local _, fovList = makeSection(Scroll, "FOV")
-fovList.LayoutOrder = nextOrder()
-makeToggle(fovList, "Show FOV ring", Config.fovVisible, function(v) Config.fovVisible = v; syncFov() end)
+local fovWrap, fovList = makeSection(Scroll, "FOV")
+fovWrap.LayoutOrder = nextOrder()
+makeToggle(fovList, "Show FOV ring", Config.fovVisible, function(v)
+    Config.fovVisible = v
+    syncFov()
+end)
 
 --=====================================================================
 -- Lifecycle
@@ -806,7 +812,6 @@ bind(RunService.RenderStepped, function(dt)
     runAimbot(snapshot, dt)
 end)
 
--- player removal cleanup
 bind(Players.PlayerRemoving, function(plr)
     destroyEsp(plr)
     if tracerPool[plr] then
@@ -815,7 +820,6 @@ bind(Players.PlayerRemoving, function(plr)
     end
 end)
 
--- PC keybind, mobile gets the button
 bind(UserInputService.InputBegan, function(input, processed)
     if processed then return end
     if input.KeyCode == MENU_KEY then
@@ -823,10 +827,12 @@ bind(UserInputService.InputBegan, function(input, processed)
     end
 end)
 
--- viewport changes
-bind(Workspace.CurrentCamera and Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"), function()
-    syncFov()
-end)
+do
+    local cam = Workspace.CurrentCamera
+    if cam then
+        bind(cam:GetPropertyChangedSignal("ViewportSize"), syncFov)
+    end
+end
 
 syncFov()
 
@@ -838,9 +844,15 @@ local function unload()
         pcall(function() c:Disconnect() end)
     end
     connections = {}
-    for plr in pairs(espCache) do destroyEsp(plr) end
-    for plr, f in pairs(tracerPool) do pcall(function() f:Destroy() end) end
+
+    for plr in pairs(espCache) do
+        destroyEsp(plr)
+    end
+    for plr, f in pairs(tracerPool) do
+        pcall(function() f:Destroy() end)
+    end
     tracerPool = {}
+
     pcall(function() Gui:Destroy() end)
     _G.__hs_menu = nil
 end
