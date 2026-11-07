@@ -1,17 +1,22 @@
--- Hypershot mobile menu - FOV / Aimbot / Silent Aim / ESP
+-- Hypershot mobile menu - FOV / Aimbot / Silent Aim / ESP / DIAG
 -- Single file, executor side. No Drawing API. One ScreenGui (panel + overlay).
 --
--- v2 fixes (see bench notes at the bottom of the ticket):
---   * silent aim never fired because the namecall detour did not guard
---     reentrancy and threw away every rewrite on the first nested call
---   * FOV ring was drawn in viewport space while the mouse origin came from
---     GetMouseLocation (screen space) - 36px vertical drift on every phone
---   * target list was rebuilt at 6.7 Hz and the aim used the stale copy
---   * camera mode applied the smooth lerp twice per frame
---   * every remote with a Vector3 arg was rewritten, not just shot remotes
+-- v3 - discovery build. v2 guessed at container names and remote shapes and
+-- failed silently when the guess was wrong. v3 finds them at runtime:
 --
--- The whole load is wrapped. Any failure prints [hs] FATAL with the line
--- number, copies it to the clipboard, and paints it on screen for 30s.
+--   * mobs     : walks Workspace, records every node whose direct children are
+--                live models with a hitbox part, then polls those nodes only.
+--                Works with Mobs/Enemies/NPCs/anything, any depth.
+--   * remotes  : every FireServer/InvokeServer is logged with its arg types.
+--                A remote that carries a CFrame or a unit Vector3 is tagged a
+--                shot candidate, and the log is rendered in the panel.
+--   * errors   : every hook is installed inside pcall with a reentrancy guard
+--                that cannot leak on error. A dead hook shows as ix-/nc-/mod-.
+--   * diag     : button prints executor capabilities, hook state, target count,
+--                container list and the top remotes with their signatures.
+--
+-- First thing to read if nothing works: run "Run diagnostics" and look at
+--   targets / mobcache / containers / nc / mod / IX.
 
 local __hs_ok, __hs_err = pcall(function()
     print("[hs] start")
@@ -29,24 +34,26 @@ local __hs_ok, __hs_err = pcall(function()
         aim       = false,
         mode      = "silent",     -- "silent" | "camera"
         assist    = true,
+        snapCam   = false,        -- silent still nudges the camera as proof of lock
         fov       = 150,          -- radius in pixels, from fovOrigin
         fovOrigin = "center",     -- "center" | "cursor"
         smooth    = 14,
         maxDist   = 700,
         mobs      = true,
         players   = true,
-        team      = true,         -- keep teammates out of the target list
-        hitPart   = "Head",       -- Head | Hitbox | Torso | UpperTorso | HumanoidRootPart | Any
-        pred      = 0,            -- lead, milliseconds
-        aimVis    = false,        -- require line of sight
-        hold      = false,        -- require the aim key / AIM button
+        autoMobs  = true,         -- runtime discovery instead of folder names
+        team      = true,
+        hitPart   = "Head",
+        pred      = 0,
+        aimVis    = false,
+        hold      = false,
+        netBlind  = false,        -- rewrite remote args when getnamecallmethod is dead
 
-        -- shot paths, each independently switchable
-        pMouse    = true,    -- GameUIMod.GetMousePos  -> Vector3 world point
-        pLoc      = true,    -- UIS:GetMouseLocation   -> Vector2 screen point
-        pRay      = true,    -- Camera:ScreenPointToRay / ViewportPointToRay
-        pHit      = true,    -- Mouse.Hit / Mouse.Target / Mouse.UnitRay
-        pNet      = true,    -- RemoteEvent:FireServer argument rewrite
+        pMouse    = true,
+        pLoc      = true,
+        pRay      = true,
+        pHit      = false,        -- __index hook: heavy, opt-in
+        pNet      = true,
 
         esp       = true,
         espName   = true,
@@ -107,7 +114,7 @@ local __hs_ok, __hs_err = pcall(function()
     local Gui = new("ScreenGui", {
         Name = "HS_Menu",
         ResetOnSpawn = false,
-        IgnoreGuiInset = true,       -- overlay coordinates == screen coordinates
+        IgnoreGuiInset = true,
         DisplayOrder = 9999,
         ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
     })
@@ -124,7 +131,6 @@ local __hs_ok, __hs_err = pcall(function()
             BackgroundColor3 = COL.row,
             AutoButtonColor = false,
             Text = "",
-            TextXAlignment = Enum.TextXAlignment.Left,
             Parent = parent,
         })
         corner(b, 5)
@@ -396,11 +402,12 @@ local __hs_ok, __hs_err = pcall(function()
     CloseBtn.MouseButton1Click:Connect(function() setPanel(false) end)
 
     --=====================================================================
-    -- Overlay: FOV ring, crosshair, lock box
+    -- Overlay
     --=====================================================================
     local Ring = new("Frame", {
         Size = UDim2.new(0, 300, 0, 300),
-        Position = UDim2.new(0.5, -150, 0.5, -150),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
         BackgroundTransparency = 1,
         Visible = false,
         Parent = Gui,
@@ -426,10 +433,8 @@ local __hs_ok, __hs_err = pcall(function()
         Parent = Gui,
     })
     corner(Lock, 3)
-    stroke(Lock, COL.on, 1.5, 0.1)
+    local LockStroke = stroke(Lock, COL.on, 1.5, 0.1)
 
-    -- Functional toggle stays in the panel; the raspberry pi answer to a
-    -- keyboard-only feature is a button that is always reachable by thumb.
     local AimBtn = new("TextButton", {
         Size = UDim2.new(0, 46, 0, 46),
         Position = UDim2.new(0, 14, 0.5, 32),
@@ -463,8 +468,6 @@ local __hs_ok, __hs_err = pcall(function()
         return nil
     end
 
-    -- Two levels only. Full GetDescendants on a 40-part mob model every scan
-    -- is the mobile frame drop, and the hitbox is never deeper than that.
     local function partOf(model)
         if not model then return nil end
         local want = C.hitPart
@@ -509,6 +512,13 @@ local __hs_ok, __hs_err = pcall(function()
         return true
     end
 
+    local function isPlayerChar(model)
+        for _, pl in ipairs(P:GetPlayers()) do
+            if pl.Character == model then return true end
+        end
+        return false
+    end
+
     local GlbStf
     do
         pcall(function()
@@ -528,53 +538,137 @@ local __hs_ok, __hs_err = pcall(function()
         return nil
     end
 
-    local CONTAINERS = { "Mobs", "Enemies", "Monsters", "NPCs", "Dummies" }
+    --=====================================================================
+    -- Discovery
+    --   The old build looked for workspace.Mobs and gave up when the game
+    --   called it something else. This walks the tree once, keeps the nodes
+    --   whose direct children are live models with a hitbox, and then polls
+    --   only those nodes - cheap per frame, correct for any folder name.
+    --=====================================================================
+    local containerNodes = {}
+    local containerNames = {}
+    local mobCached = 0
+    local nodesFound = 0
+    local discoverEvery = 6
+    local discoverClock = 0
+    local discovering = false
+
+    local function discover()
+        if discovering then return end
+        discovering = true
+        local okAll, err = pcall(function()
+            local nodes, seen, names = {}, {}, {}
+            local visited = 0
+            local function walk(node, depth)
+                if depth > 6 or visited > 3000 then return end
+                local kids
+                local okk, res = pcall(function() return node:GetChildren() end)
+                if not okk then return end
+                kids = res
+                local isHit = false
+                for _, ch in ipairs(kids) do
+                    visited = visited + 1
+                    if visited > 3000 then return end
+                    if ch:IsA("Model") then
+                        if not isPlayerChar(ch) and alive(ch) and partOf(ch) then
+                            isHit = true
+                        end
+                        walk(ch, depth + 1)
+                    elseif ch:IsA("Folder") or ch:IsA("Configuration") then
+                        walk(ch, depth + 1)
+                    end
+                end
+                if isHit then
+                    if not seen[node] then
+                        seen[node] = true
+                        nodes[#nodes + 1] = node
+                        local nm = (node == W) and "Workspace" or node.Name
+                        names[nm] = (names[nm] or 0) + 1
+                        containerNames[#containerNames + 1] = nm
+                    end
+                end
+            end
+            walk(W, 0)
+            containerNodes = nodes
+            nodesFound = #nodes
+        end)
+        discovering = false
+        if not okAll then
+            print("[hs] discover error: " .. tostring(err))
+        end
+    end
+
+    -- Duplicate container names get deduped for the diag line only.
+    local function containerSummary()
+        local seen, out = {}, {}
+        for _, n in ipairs(containerNames) do
+            if not seen[n] then
+                seen[n] = true
+                out[#out + 1] = n
+                if #out >= 8 then break end
+            end
+        end
+        if #out == 0 then return "-" end
+        return table.concat(out, ",")
+    end
 
     local targets = {}
     local esp = {}
     local scanClock = 0
-    local scanEvery = 0.05        -- collect() rate; projection runs every frame
+    local scanEvery = 0.05
 
-    local function harvest(container, kind, out, depth)
-        if depth > 2 then return end
-        for _, m in ipairs(container:GetChildren()) do
-            if #out >= MAXT then return end
-            if m:IsA("Model") then
-                local ok, rec = pcall(function()
-                    if not alive(m) then return nil end
-                    local part = partOf(m)
-                    if not part then return nil end
-                    return { model = m, part = part, kind = kind }
-                end)
-                if ok and rec then out[#out + 1] = rec end
-            elseif m:IsA("Folder") then
-                harvest(m, kind, out, depth + 1)
-            end
-        end
+    local function pushOut(out, m, kind)
+        if #out >= MAXT or not m or not m.Parent then return end
+        if kind == "mob" and isPlayerChar(m) then return end
+        local ok, rec = pcall(function()
+            if not alive(m) then return nil end
+            local part = partOf(m)
+            if not part then return nil end
+            return { model = m, part = part, kind = kind }
+        end)
+        if ok and rec then out[#out + 1] = rec end
     end
 
     local function collect()
         local out = {}
         if C.mobs then
-            for _, name in ipairs(CONTAINERS) do
-                local folder = W:FindFirstChild(name)
-                if folder then harvest(folder, "mob", out, 0) end
+            if C.autoMobs then
+                if #containerNodes == 0 then
+                    for _, ch in ipairs(W:GetChildren()) do
+                        if ch:IsA("Model") then pushOut(out, ch, "mob") end
+                    end
+                else
+                    for _, node in ipairs(containerNodes) do
+                        if node == W or node.Parent ~= nil then
+                            local okk, kids = pcall(function() return node:GetChildren() end)
+                            if okk then
+                                for _, ch in ipairs(kids) do
+                                    if ch:IsA("Model") then pushOut(out, ch, "mob") end
+                                end
+                            end
+                        end
+                    end
+                end
+            else
+                for _, name in ipairs({ "Mobs", "Enemies", "Monsters", "NPCs", "Dummies" }) do
+                    local folder = W:FindFirstChild(name)
+                    if folder then
+                        local okk, kids = pcall(function() return folder:GetChildren() end)
+                        if okk then
+                            for _, ch in ipairs(kids) do
+                                if ch:IsA("Model") then pushOut(out, ch, "mob") end
+                            end
+                        end
+                    end
+                end
             end
         end
         if C.players then
             for _, pl in ipairs(P:GetPlayers()) do
-                if pl ~= LP and pl.Character then
-                    local ch = pl.Character
-                    local ok, rec = pcall(function()
-                        if not alive(ch) then return nil end
-                        local part = partOf(ch)
-                        if not part then return nil end
-                        return { model = ch, part = part, kind = "player" }
-                    end)
-                    if ok and rec then out[#out + 1] = rec end
-                end
+                if pl ~= LP and pl.Character then pushOut(out, pl.Character, "player") end
             end
         end
+        mobCached = #out
         return out
     end
 
@@ -607,8 +701,8 @@ local __hs_ok, __hs_err = pcall(function()
     --=====================================================================
     local S = {
         tgt   = nil,
-        busy  = false,      -- reentrancy guard: detours must never nest
-        raw   = false,      -- force a detour to pass the original value through
+        busy  = false,
+        raw   = false,
         mp    = { h = 0, c = 0 },
         loc   = { h = 0, c = 0 },
         ray   = { h = 0, c = 0 },
@@ -622,6 +716,7 @@ local __hs_ok, __hs_err = pcall(function()
         inst  = false,
         namecall = nil,
         index = nil,
+        gnmDead = false,
     }
 
     local holdAim = false
@@ -692,28 +787,30 @@ local __hs_ok, __hs_err = pcall(function()
 
     --=====================================================================
     -- Shot router
-    --   Every path the game might read the aim point from is covered, and each
-    --   one keeps its own counter so the status line says which path is live.
-    --
-    --   pNet    __namecall FireServer      -> argument rewrite      (mobile)
-    --   pRay    Camera:ScreenPointToRay    -> Ray direction
-    --           Camera:ViewportPointToRay
-    --   pLoc    UIS:GetMouseLocation       -> Vector2 screen point
-    --   pMouse  GameUIMod.GetMousePos      -> Vector3 world point
-    --   pHit    Mouse.Hit / Target / UnitRay
     --=====================================================================
-    local function logShot(name, args, n)
+    local function logShot(inst, name, args, n)
         local parts = {}
-        for i = 1, n do parts[i] = typeof(args[i]) end
+        local shot = false
+        for i = 1, n do
+            local tv = typeof(args[i])
+            parts[i] = tv
+            if tv == "CFrame" then
+                shot = true
+            elseif tv == "Vector3" then
+                local m = args[i].Magnitude
+                if m > 0.5 and m < 1.5 then shot = true end
+            end
+        end
         local sig = name .. "(" .. table.concat(parts, ",") .. ")"
         local rec = S.log[sig]
         if not rec then
-            rec = { n = 0, name = name }
+            rec = { n = 0, name = name, inst = inst, shot = shot }
             S.log[sig] = rec
             S.order[#S.order + 1] = sig
-            if #S.order > 60 then table.remove(S.order, 1) end
+            if #S.order > 80 then table.remove(S.order, 1) end
         end
         rec.n = rec.n + 1
+        if shot then rec.shot = true end
     end
 
     local function dumpLog()
@@ -723,16 +820,15 @@ local __hs_ok, __hs_err = pcall(function()
         end
         print("[hs] ---- shot log ----")
         for _, sig in ipairs(S.order) do
-            print(string.format("[hs] %5d  %s", S.log[sig].n, sig))
+            local r = S.log[sig]
+            print(string.format("[hs] %5d %s %s", r.n, r.shot and "*" or " ", sig))
         end
         print("[hs] ------------------")
     end
 
     -- One Vector3 rewrite at most, plus one direction rewrite. A magnitude near
     -- 1 is treated as a unit direction and re-aimed from the camera; anything
-    -- further out is treated as a world point and swapped for the head. A
-    -- CFrame is rebuilt looking at the head. A triple of numbers is only
-    -- touched when it actually reads as a direction.
+    -- further out is treated as a world point and swapped for the head.
     local function retargetArgs(args, n)
         local hp = aimPoint()
         if not hp then return nil end
@@ -740,7 +836,7 @@ local __hs_ok, __hs_err = pcall(function()
         local eye = cam and cam.CFrame.Position or nil
         local changed = 0
 
-        local function dirFrom(v)
+        local function dirFrom()
             if not eye then return nil end
             local d = hp - eye
             if d.Magnitude <= 0.01 then return nil end
@@ -754,7 +850,7 @@ local __hs_ok, __hs_err = pcall(function()
             if tv == "Vector3" then
                 local m = v.Magnitude
                 if m > 0.5 and m < 1.5 then
-                    local d = dirFrom(v)
+                    local d = dirFrom()
                     if d then
                         args[i] = d
                         changed = changed + 1
@@ -772,10 +868,9 @@ local __hs_ok, __hs_err = pcall(function()
             elseif tv == "number" and i + 2 <= n then
                 local b, c = args[i + 1], args[i + 2]
                 if typeof(b) == "number" and typeof(c) == "number" then
-                    local guess = Vector3.new(v, b, c)
-                    local gm = guess.Magnitude
+                    local gm = Vector3.new(v, b, c).Magnitude
                     if gm > 0.5 and gm < 1.5 then
-                        local d = dirFrom(guess)
+                        local d = dirFrom()
                         if d then
                             args[i], args[i + 1], args[i + 2] = d.X, d.Y, d.Z
                             changed = changed + 1
@@ -785,6 +880,33 @@ local __hs_ok, __hs_err = pcall(function()
             end
         end
         if changed > 0 then return args, n end
+        return nil
+    end
+
+    local SHOT_NAME = { "shoot", "fire", "hit", "damage", "attack", "shot",
+                        "aim", "swing", "cast", "spell", "combat", "bullet",
+                        "reload", "gun", "weapon", "dmg" }
+
+    local function shotishName(name)
+        local ln = string.lower(tostring(name))
+        for _, k in ipairs(SHOT_NAME) do
+            if string.find(ln, k, 1, true) then return true end
+        end
+        return false
+    end
+
+    -- A remote with one vector-ish argument and a shot-shaped name is safe to
+    -- rewrite even when the executor will not report the namecall method.
+    local function blindShot(self, args, n)
+        if n < 1 or n > 3 then return nil end
+        if not shotishName(self.Name) then return nil end
+        local v = args[1]
+        local tv = typeof(v)
+        if tv == "CFrame" then return args, n end
+        if tv == "Vector3" then
+            local m = v.Magnitude
+            if m > 0.5 and m < 1.5 then return args, n end
+        end
         return nil
     end
 
@@ -798,21 +920,29 @@ local __hs_ok, __hs_err = pcall(function()
 
     local function makeDetour(old, gnm)
         local unpackFn = table.unpack or unpack
+        local function safeOld(self, ...)
+            S.busy = true
+            local res = table.pack(pcall(old, self, ...))
+            S.busy = false
+            if res[1] then return unpackFn(res, 2, res.n) end
+            error(res[2], 0)
+        end
+
         return function(self, ...)
-            -- Nested call: the original function itself re-entered the
-            -- metamethod. Anything other than a straight pass-through here
-            -- recurses until the executor kills the thread - which is why the
-            -- old build looked like "silent aim does nothing".
             if S.busy or S.raw then return old(self, ...) end
 
-            local m = gnm()
-            if not m or not WANT[m] then return old(self, ...) end
+            local m
+            local okm, got = pcall(gnm)
+            if okm then m = got end
+            if m == nil then S.gnmDead = true end
+
+            if m and not WANT[m] then return old(self, ...) end
 
             if m == "GetMouseLocation" then
                 if C.pLoc and self == U and armed() then
-                    S.loc.c = S.loc.c + 1
                     local sp = screenOf(S.tgt.part)
                     if sp then
+                        S.loc.c = S.loc.c + 1
                         S.loc.h = S.loc.h + 1
                         return sp
                     end
@@ -838,21 +968,29 @@ local __hs_ok, __hs_err = pcall(function()
                 return old(self, ...)
             end
 
-            -- FireServer / InvokeServer
+            -- FireServer / InvokeServer, or the blind path when gnm is dead
             local n = select("#", ...)
             local args = { ... }
-            pcall(logShot, tostring(self.Name), args, n)
-            if not C.pNet or not armed() then return old(self, ...) end
 
-            S.busy = true
-            local ok, na, nn = pcall(retargetArgs, args, n)
-            S.busy = false
-            if not (ok and na) then return old(self, ...) end
+            if m == nil then
+                if not (C.netBlind and C.pNet and armed()) then return old(self, ...) end
+                local na, nn = blindShot(self, args, n)
+                if not na then return old(self, ...) end
+                S.net.c = S.net.c + 1
+                local okr, ra, rn = pcall(retargetArgs, na, nn)
+                if not (okr and ra) then return old(self, ...) end
+                S.net.h = S.net.h + 1
+                return safeOld(self, unpackFn(ra, 1, rn))
+            end
 
-            S.busy = true
-            local res = table.pack(old(self, unpackFn(na, 1, nn)))
-            S.busy = false
-            return unpackFn(res, 1, res.n)
+            pcall(logShot, self, tostring(self.Name), args, n)
+            if not (C.pNet and armed()) then return old(self, ...) end
+
+            S.net.c = S.net.c + 1
+            local okr, na, nn = pcall(retargetArgs, args, n)
+            if not (okr and na) then return old(self, ...) end
+            S.net.h = S.net.h + 1
+            return safeOld(self, unpackFn(na, 1, nn))
         end
     end
 
@@ -928,13 +1066,9 @@ local __hs_ok, __hs_err = pcall(function()
                 if not hp then return nil end
                 if key == "Target" then
                     local p = S.tgt and S.tgt.part
-                    if p and p.Parent then
-                        S.hit.h = S.hit.h + 1
-                        return p
-                    end
+                    if p and p.Parent then return p end
                     return nil
                 elseif key == "Hit" then
-                    S.hit.h = S.hit.h + 1
                     return CFrame.new(hp)
                 else
                     local cam = W.CurrentCamera
@@ -942,12 +1076,14 @@ local __hs_ok, __hs_err = pcall(function()
                     local origin = cam.CFrame.Position
                     local d = hp - origin
                     if d.Magnitude < 0.01 then return nil end
-                    S.hit.h = S.hit.h + 1
                     return Ray.new(origin, d.Unit)
                 end
             end)
             S.busy = false
-            if ok and out ~= nil then return out end
+            if ok and out ~= nil then
+                S.hit.h = S.hit.h + 1
+                return out
+            end
             return oldIndex(self, key)
         end
 
@@ -1011,7 +1147,6 @@ local __hs_ok, __hs_err = pcall(function()
             if S.busy or S.raw then return f(...) end
             local a, b, c = f(...)
             if not (C.pMouse and armed()) then return a, b, c end
-            S.mp.c = S.mp.c + 1
             local hp = aimPoint()
             if not hp then return a, b, c end
             if typeof(a) == "Vector3" then
@@ -1044,9 +1179,6 @@ local __hs_ok, __hs_err = pcall(function()
         return false
     end
 
-    -- __index is the one hook that runs on every property read in the game.
-    -- Keep it installed only while pHit is on; a phone does not have the
-    -- frame budget for a Lua trampoline on every Vector3 access.
     local function syncIndex()
         if C.pHit then
             if not S.index then installIndex() end
@@ -1213,7 +1345,7 @@ local __hs_ok, __hs_err = pcall(function()
 
         local seen = {}
         for _, t in ipairs(list) do
-            if t.dist <= C.espMax and t.part.Parent then
+            if t.dist and t.dist <= C.espMax and t.part.Parent then
                 local want = (t.kind == "mob" and C.espMobs) or (t.kind == "player" and C.espPlayers)
                 if want then
                     seen[t.model] = true
@@ -1253,10 +1385,8 @@ local __hs_ok, __hs_err = pcall(function()
                             rec.hl.Enabled = C.espChams
                         end
                         if rec.beam then
-                            if not C.espLine then
-                                rec.beam.Enabled = false
-                            else
-                                rec.beam.Enabled = true
+                            rec.beam.Enabled = C.espLine and true or false
+                            if C.espLine then
                                 rec.beam.Color = ColorSequence.new(colour(t))
                             end
                         end
@@ -1289,7 +1419,7 @@ local __hs_ok, __hs_err = pcall(function()
             local want = (t.kind == "mob" and C.mobs) or (t.kind == "player" and C.players)
             if want and t.onScreen and t.dist <= C.maxDist then
                 if C.team and t.st == true then
-                    -- teammate, skip
+                    -- teammate
                 else
                     local d = (t.screen - origin).Magnitude
                     if d <= C.fov and d < bestD then
@@ -1317,7 +1447,10 @@ local __hs_ok, __hs_err = pcall(function()
     local bound = false
 
     local function applyAim(dt)
-        if not C.aim or C.mode ~= "camera" then return end
+        if not C.aim then return end
+        local camMode = C.mode == "camera"
+        local snapMode = C.mode == "silent" and C.snapCam
+        if not (camMode or snapMode) then return end
         if C.hold and not holdAim then return end
         local t = T.current
         local cam = W.CurrentCamera
@@ -1327,6 +1460,7 @@ local __hs_ok, __hs_err = pcall(function()
         local cf = cam.CFrame
         local goal = CFrame.lookAt(cf.Position, hp)
         local a = math.clamp((dt or 0.016) * C.smooth, 0.08, 1)
+        if snapMode then a = math.clamp(a * 0.5, 0.04, 0.5) end
         cam.CFrame = cf:Lerp(goal, a)
     end
 
@@ -1335,6 +1469,71 @@ local __hs_ok, __hs_err = pcall(function()
         bound = pcall(function()
             R:BindToRenderStep(BIND, Enum.RenderPriority.Camera.Value + 1, applyAim)
         end)
+    end
+
+    --=====================================================================
+    -- Diagnostics
+    --=====================================================================
+    local DiagBox = new("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 150),
+        BackgroundColor3 = Color3.fromRGB(24, 24, 30),
+        BackgroundTransparency = 0,
+        Font = Enum.Font.Code,
+        TextSize = 9,
+        TextColor3 = COL.dim,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        TextWrapped = true,
+        Text = "diag: press Run diagnostics",
+        Visible = false,
+        Parent = Body,
+    })
+    corner(DiagBox, 5)
+
+    local function espCount()
+        local n = 0
+        for _ in pairs(esp) do n = n + 1 end
+        return n
+    end
+
+    local function diagnostics()
+        local lines = {}
+        local function add(f, ...) lines[#lines + 1] = string.format(f, ...) end
+        local gnm = getnamecallmethod or get_namecall_method
+        add("hs diag  t=%d esp=%d mobs=%d", #targets, espCount(), mobCached)
+        add("exec gethui=%s hmm=%s hookfn=%s gnm=%s",
+            tostring(type(gethui) == "function"),
+            tostring(type(hookmetamethod) == "function"),
+            tostring(type(hookfunction) == "function"),
+            tostring(type(gnm) == "function"))
+        add("hook nc=%s ix=%s mod=%s gnmdead=%s",
+            tostring(S.namecall ~= nil), tostring(S.index ~= nil),
+            tostring(S.module ~= nil), tostring(S.gnmDead))
+        add("nodes=%d  %s", nodesFound, containerSummary())
+        add("cat %d/%d loc %d/%d ray %d/%d hit %d/%d net %d/%d",
+            S.mp.h, S.mp.c, S.loc.h, S.loc.c, S.ray.h, S.ray.c,
+            S.hit.h, S.hit.c, S.net.h, S.net.c)
+        local t = S.tgt
+        if t then
+            add("tgt %s %.0fm on=%s", tostring(t.model.Name),
+                t.dist or -1, tostring(t.onScreen))
+        else
+            add("tgt none")
+        end
+        local shown = 0
+        for _, sig in ipairs(S.order) do
+            local r = S.log[sig]
+            add("%s%4d %s", r.shot and "*" or " ", r.n, sig)
+            shown = shown + 1
+            if shown >= 10 then break end
+        end
+        if shown == 0 then add("no remotes logged yet") end
+        local text = table.concat(lines, "\n")
+        print("[hs] ==== diag ====")
+        for _, l in ipairs(lines) do print("[hs] " .. l) end
+        print("[hs] ==============")
+        DiagBox.Text = text
+        DiagBox.Visible = true
     end
 
     --=====================================================================
@@ -1350,13 +1549,10 @@ local __hs_ok, __hs_err = pcall(function()
     local statusClock = 0
 
     local function overlay()
-        local cam = W.CurrentCamera
-        if not cam then return end
         local origin = T.origin
         local locked = S.tgt ~= nil and armed()
 
         Ring.Size = UDim2.new(0, C.fov * 2, 0, C.fov * 2)
-        Ring.AnchorPoint = Vector2.new(0.5, 0.5)
         Ring.Position = UDim2.new(0, origin.X, 0, origin.Y)
         Ring.Visible = C.ring
         RingStroke.Color = locked and COL.on or Color3.new(1, 1, 1)
@@ -1374,7 +1570,18 @@ local __hs_ok, __hs_err = pcall(function()
         AimBtn.TextColor3 = holdAim and Color3.new(0, 0, 0) or COL.dim
     end
 
-    bind(R.RenderStepped, function(dt)
+    local function blockReason()
+        if not C.aim then return "aim off" end
+        if C.hold and not holdAim then return "hold key" end
+        if not S.tgt then
+            if #targets == 0 then return "NO TARGETS" end
+            return "out of fov"
+        end
+        if C.aimVis and S.tgt.vis == false then return "no los" end
+        return "LOCK " .. tostring(S.tgt.model.Name)
+    end
+
+    local function frame(dt)
         local cam = W.CurrentCamera
         if not cam then return end
 
@@ -1387,7 +1594,13 @@ local __hs_ok, __hs_err = pcall(function()
             scanClock = 0
             targets = collect()
         end
-        project(targets)      -- fresh screen data every frame, no 150ms staleness
+        project(targets)
+
+        discoverClock = discoverClock + dt
+        if C.autoMobs and discoverClock >= discoverEvery then
+            discoverClock = 0
+            task.spawn(discover)
+        end
 
         renderEsp(targets)
 
@@ -1395,10 +1608,8 @@ local __hs_ok, __hs_err = pcall(function()
         T.current = t
         S.tgt = t
 
-        if C.aim and C.mode == "camera" then
+        if C.aim and (C.mode == "camera" or C.snapCam) then
             if not bound then tryBind() end
-            -- applyAim runs from BindToRenderStep only. Calling it here too was
-            -- doubling the lerp every frame (inconsistent smooth, overshoot).
         end
 
         overlay()
@@ -1410,24 +1621,34 @@ local __hs_ok, __hs_err = pcall(function()
             syncIndex()
             if not S.module then installMouse() end
             local live = S.net.h + S.ray.h + S.loc.h + S.mp.h + S.hit.h
-            local tname = t and t.model and t.model.Name or "-"
             Status.Text = string.format(
-                "%s fov%d tgt %s\nt%d  mp %d/%d loc %d/%d ray %d/%d hit %d/%d net %d/%d",
-                (S.namecall and "NC " or "nc- ") .. (S.index and "IX " or "ix- ") .. (S.module and "MOD" or "mod-"),
-                math.floor(C.fov), tname,
-                #targets, S.mp.h, S.mp.c, S.loc.h, S.loc.c,
-                S.ray.h, S.ray.c, S.hit.h, S.hit.c, S.net.h, S.net.c)
+                "%s t%d mobs%d\n%s  net %d/%d ray %d/%d loc %d/%d",
+                (S.namecall and "NC" or "nc-") .. " " .. (S.module and "MOD" or "mod-"),
+                #targets, mobCached, blockReason(),
+                S.net.h, S.net.c, S.ray.h, S.ray.c, S.loc.h, S.loc.c)
             Status.TextColor3 = live > 0 and COL.on or COL.dim
+        end
+    end
+
+    bind(R.RenderStepped, function(dt)
+        local ok, err = pcall(frame, dt)
+        if not ok then
+            -- one bad frame must not look like "nothing works" forever
+            if not S.lastErr or S.lastErr ~= tostring(err) then
+                S.lastErr = tostring(err)
+                warn("[hs] frame error: " .. S.lastErr)
+            end
         end
     end)
 
     bind(LP.CharacterAdded, function()
-        task.wait(0.5)
+        task.wait(0.6)
         installAll()
+        task.spawn(discover)
     end)
 
     --=====================================================================
-    -- Input: hold-to-aim (E on keyboard, AIM button on touch)
+    -- Input
     --=====================================================================
     local AIM_KEY = Enum.KeyCode.E
 
@@ -1479,6 +1700,7 @@ local __hs_ok, __hs_err = pcall(function()
     mkToggle(Body, "Target mobs", C.mobs, function(v) C.mobs = v end)
     mkToggle(Body, "Target players", C.players, function(v) C.players = v end)
     mkToggle(Body, "Retarget shots in camera mode", C.assist, function(v) C.assist = v end)
+    mkToggle(Body, "Silent + snap camera", C.snapCam, function(v) C.snapCam = v end)
     mkToggle(Body, "Show FOV ring", C.ring, function(v) C.ring = v end)
     mkToggle(Body, "Show lock box", C.lockbox, function(v) C.lockbox = v end)
 
@@ -1489,10 +1711,21 @@ local __hs_ok, __hs_err = pcall(function()
         for i, v in ipairs(PART_ORDER) do if v == C.hitPart then idx = i end end
         C.hitPart = PART_ORDER[(idx % #PART_ORDER) + 1]
         partBtn.Text = "Target part: " .. C.hitPart
+        task.spawn(discover)
     end)
+
+    section("TARGETS")
+    mkToggle(Body, "Auto-detect mobs", C.autoMobs, function(v)
+        C.autoMobs = v
+        if v then task.spawn(discover) end
+    end)
+    mkButton(Body, "Rescan world now", function() task.spawn(discover) end)
+    mkToggle(Body, "ESP mobs", C.espMobs, function(v) C.espMobs = v end)
+    mkToggle(Body, "ESP players", C.espPlayers, function(v) C.espPlayers = v end)
 
     section("SHOT PATHS")
     mkToggle(Body, "Remote args (silent)", C.pNet, function(v) C.pNet = v end)
+    mkToggle(Body, "Remote args, blind (no method name)", C.netBlind, function(v) C.netBlind = v end)
     mkToggle(Body, "Touch ray", C.pRay, function(v) C.pRay = v end)
     mkToggle(Body, "Mouse location", C.pLoc, function(v) C.pLoc = v end)
     mkToggle(Body, "GameUIMod.GetMousePos", C.pMouse, function(v) C.pMouse = v end)
@@ -1507,8 +1740,14 @@ local __hs_ok, __hs_err = pcall(function()
     mkToggle(Body, "Chams", C.espChams, function(v) C.espChams = v end)
     mkToggle(Body, "Tracer lines", C.espLine, function(v) C.espLine = v end)
     mkSlider(Body, "ESP max distance", 200, 3000, C.espMax, function(v) C.espMax = v end)
-    mkToggle(Body, "ESP mobs", C.espMobs, function(v) C.espMobs = v end)
-    mkToggle(Body, "ESP players", C.espPlayers, function(v) C.espPlayers = v end)
+
+    section("DIAG")
+    mkButton(Body, "Run diagnostics (console + panel)", diagnostics)
+    mkButton(Body, "Copy diag to clipboard", function()
+        pcall(function()
+            if setclipboard then setclipboard(DiagBox.Text) end
+        end)
+    end)
 
     mkToggle(Body, "Open panel on load", true, function(v) setPanel(v) end)
     setPanel(true)
@@ -1531,16 +1770,22 @@ local __hs_ok, __hs_err = pcall(function()
     _G.__hs = {
         unload = unload,
         config = C,
-        stats = function()
-            return S.mp, S.loc, S.ray, S.net, S.namecall ~= nil, S.inst
-        end,
+        diag = diagnostics,
         dump = dumpLog,
         log = dumpLog,
-        origin = fovOrigin,
+        discover = discover,
+        stats = function() return S.mp, S.loc, S.ray, S.net, S.namecall ~= nil, S.inst end,
     }
     if getgenv then pcall(function() getgenv().__hs = _G.__hs end) end
 
-    task.spawn(function() pcall(installAll) end)
+    task.spawn(function()
+        pcall(installAll)
+        pcall(discover)
+        task.wait(3)
+        print("[hs] post-load diag")
+        pcall(diagnostics)
+    end)
+
     overlay()
     print("[hs] ready")
 end)
