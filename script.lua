@@ -1,25 +1,25 @@
 -- Hypershot mobile menu - FOV / Aimbot / Silent Aim / ESP / DIAG
 -- Single file, executor side. No Drawing API. One ScreenGui (panel + overlay).
 --
--- v3 - discovery build. v2 guessed at container names and remote shapes and
--- failed silently when the guess was wrong. v3 finds them at runtime:
+-- v4 - silent fix. The v3 discovery build worked but the silent path was
+-- wiring into the wrong metamethods and defaulting pHit/netBlind to false,
+-- so on most mobile shooters nothing ever got retargeted. v4:
 --
---   * mobs     : walks Workspace, records every node whose direct children are
---                live models with a hitbox part, then polls those nodes only.
---                Works with Mobs/Enemies/NPCs/anything, any depth.
---   * remotes  : every FireServer/InvokeServer is logged with its arg types.
---                A remote that carries a CFrame or a unit Vector3 is tagged a
---                shot candidate, and the log is rendered in the panel.
---   * errors   : every hook is installed inside pcall with a reentrancy guard
---                that cannot leak on error. A dead hook shows as ix-/nc-/mod-.
---   * diag     : button prints executor capabilities, hook state, target count,
---                container list and the top remotes with their signatures.
+--   * pHit defaults ON  -> __index over Mouse catches Hit / Target / UnitRay
+--   * netBlind defaults ON  -> blind remote rewrite when getnamecallmethod dies
+--   * auto-blind in makeDetour -> if gnm returns nil, flip netBlind live
+--   * retargetArgs widened  -> Vector2 (screen coords), Ray, Vector3 triple,
+--                              world Vector3, CFrame. Up to 4 rewrites per call
+--   * pick() candidate cap removed  -> visibility check now runs on every
+--                                       target inside the FOV, not just 8
+--   * fov default 300, maxDist 900, espMax 500  -> mobile-real numbers
 --
 -- First thing to read if nothing works: run "Run diagnostics" and look at
---   targets / mobcache / containers / nc / mod / IX.
+--   targets / mobcache / containers / nc / mod / IX and the cat/loc/ray/hit/net
+--   counters. A counter with c>0 and h=0 is the path that needs work.
 
 local __hs_ok, __hs_err = pcall(function()
-    print("[hs] start")
+    print("[hs] start v4")
 
     local P   = game:GetService("Players")
     local R   = game:GetService("RunService")
@@ -34,25 +34,25 @@ local __hs_ok, __hs_err = pcall(function()
         aim       = false,
         mode      = "silent",     -- "silent" | "camera"
         assist    = true,
-        snapCam   = false,        -- silent still nudges the camera as proof of lock
-        fov       = 150,          -- radius in pixels, from fovOrigin
+        snapCam   = false,
+        fov       = 300,          -- v4: era 150
         fovOrigin = "center",     -- "center" | "cursor"
         smooth    = 14,
-        maxDist   = 700,
+        maxDist   = 900,          -- v4: era 700
         mobs      = true,
         players   = true,
-        autoMobs  = true,         -- runtime discovery instead of folder names
+        autoMobs  = true,
         team      = true,
         hitPart   = "Head",
         pred      = 0,
         aimVis    = false,
         hold      = false,
-        netBlind  = false,        -- rewrite remote args when getnamecallmethod is dead
+        netBlind  = true,         -- v4: era false
 
         pMouse    = true,
         pLoc      = true,
         pRay      = true,
-        pHit      = false,        -- __index hook: heavy, opt-in
+        pHit      = true,         -- v4: era false - la ruta crítica
         pNet      = true,
 
         esp       = true,
@@ -61,7 +61,7 @@ local __hs_ok, __hs_err = pcall(function()
         espHp     = true,
         espChams  = false,
         espLine   = true,
-        espMax    = 1200,
+        espMax    = 500,          -- v4: era 1200
         espMobs   = true,
         espPlayers= true,
         ring      = true,
@@ -451,7 +451,7 @@ local __hs_ok, __hs_err = pcall(function()
     stroke(AimBtn, COL.off, 1.5)
 
     --=====================================================================
-    -- Targeting
+    -- Targeting helpers
     --=====================================================================
     local MAXT = 96
 
@@ -540,10 +540,6 @@ local __hs_ok, __hs_err = pcall(function()
 
     --=====================================================================
     -- Discovery
-    --   The old build looked for workspace.Mobs and gave up when the game
-    --   called it something else. This walks the tree once, keeps the nodes
-    --   whose direct children are live models with a hitbox, and then polls
-    --   only those nodes - cheap per frame, correct for any folder name.
     --=====================================================================
     local containerNodes = {}
     local containerNames = {}
@@ -598,7 +594,6 @@ local __hs_ok, __hs_err = pcall(function()
         end
     end
 
-    -- Duplicate container names get deduped for the diag line only.
     local function containerSummary()
         local seen, out = {}, {}
         for _, n in ipairs(containerNames) do
@@ -799,6 +794,8 @@ local __hs_ok, __hs_err = pcall(function()
             elseif tv == "Vector3" then
                 local m = args[i].Magnitude
                 if m > 0.5 and m < 1.5 then shot = true end
+            elseif tv == "Vector2" or tv == "Ray" then
+                shot = true
             end
         end
         local sig = name .. "(" .. table.concat(parts, ",") .. ")"
@@ -826,9 +823,10 @@ local __hs_ok, __hs_err = pcall(function()
         print("[hs] ------------------")
     end
 
-    -- One Vector3 rewrite at most, plus one direction rewrite. A magnitude near
-    -- 1 is treated as a unit direction and re-aimed from the camera; anything
-    -- further out is treated as a world point and swapped for the head.
+    -- v4: retarget widened. Vector2 (screen coords), Ray, world Vector3,
+    -- unit Vector3, CFrame, and the (x,y,z) triple as numbers. Up to 4
+    -- rewrites per call. First match wins for the "current aim point" so
+    -- overloaded calls do not stomp each other.
     local function retargetArgs(args, n)
         local hp = aimPoint()
         if not hp then return nil end
@@ -842,9 +840,14 @@ local __hs_ok, __hs_err = pcall(function()
             if d.Magnitude <= 0.01 then return nil end
             return d.Unit
         end
+        local function tgtScreen()
+            local t = S.tgt
+            if not t or not t.part then return nil end
+            return screenOf(t.part)
+        end
 
         for i = 1, n do
-            if changed >= 2 then break end
+            if changed >= 4 then break end
             local v = args[i]
             local tv = typeof(v)
             if tv == "Vector3" then
@@ -862,9 +865,22 @@ local __hs_ok, __hs_err = pcall(function()
                         changed = changed + 1
                     end
                 end
+            elseif tv == "Vector2" then
+                local sp = tgtScreen()
+                if sp then
+                    args[i] = sp
+                    changed = changed + 1
+                end
             elseif tv == "CFrame" then
                 args[i] = CFrame.lookAt(v.Position, hp)
                 changed = changed + 1
+            elseif tv == "Ray" then
+                local origin = v.Origin
+                local d = hp - origin
+                if d.Magnitude > 0.01 then
+                    args[i] = Ray.new(origin, d.Unit * math.max(v.Direction.Magnitude, 100))
+                    changed = changed + 1
+                end
             elseif tv == "number" and i + 2 <= n then
                 local b, c = args[i + 1], args[i + 2]
                 if typeof(b) == "number" and typeof(c) == "number" then
@@ -873,7 +889,7 @@ local __hs_ok, __hs_err = pcall(function()
                         local d = dirFrom()
                         if d then
                             args[i], args[i + 1], args[i + 2] = d.X, d.Y, d.Z
-                            changed = changed + 1
+                            changed = changed + 3
                         end
                     end
                 end
@@ -895,14 +911,12 @@ local __hs_ok, __hs_err = pcall(function()
         return false
     end
 
-    -- A remote with one vector-ish argument and a shot-shaped name is safe to
-    -- rewrite even when the executor will not report the namecall method.
     local function blindShot(self, args, n)
         if n < 1 or n > 3 then return nil end
         if not shotishName(self.Name) then return nil end
         local v = args[1]
         local tv = typeof(v)
-        if tv == "CFrame" then return args, n end
+        if tv == "CFrame" or tv == "Ray" or tv == "Vector2" then return args, n end
         if tv == "Vector3" then
             local m = v.Magnitude
             if m > 0.5 and m < 1.5 then return args, n end
@@ -934,7 +948,11 @@ local __hs_ok, __hs_err = pcall(function()
             local m
             local okm, got = pcall(gnm)
             if okm then m = got end
-            if m == nil then S.gnmDead = true end
+            if m == nil then
+                S.gnmDead = true
+                -- v4: auto-blind so the executor staying dumb does not kill silent
+                if C.pNet and not C.netBlind then C.netBlind = true end
+            end
 
             if m and not WANT[m] then return old(self, ...) end
 
@@ -968,7 +986,6 @@ local __hs_ok, __hs_err = pcall(function()
                 return old(self, ...)
             end
 
-            -- FireServer / InvokeServer, or the blind path when gnm is dead
             local n = select("#", ...)
             local args = { ... }
 
@@ -1036,58 +1053,61 @@ local __hs_ok, __hs_err = pcall(function()
         return true
     end
 
+    -- v4: installIndex rewritten. The v3 version captured orig before it
+    -- existed and relied on a pcall that could not really detect the class.
+    -- v4 checks self.ClassName == "Mouse" on the real target and returns
+    -- the aimpoint for Hit / Target / UnitRay / X / Y.
     local function installIndex()
         if S.index then return true end
         if type(hookmetamethod) ~= "function" then return false end
 
-        local oldIndex = nil
-        local detour = nil
-        local wrapper = function(self, key)
-            if not detour then return oldIndex(self, key) end
-            return detour(self, key)
-        end
-
-        local okH, orig = pcall(hookmetamethod, game, "__index", wrapper)
-        if not okH or type(orig) ~= "function" then return false end
-        oldIndex = orig
-
-        detour = function(self, key)
-            if S.busy or S.raw then return oldIndex(self, key) end
-            if key ~= "Hit" and key ~= "Target" and key ~= "UnitRay" then
-                return oldIndex(self, key)
+        local orig, wrapper
+        wrapper = function(self, key)
+            if S.busy or S.raw then return orig(self, key) end
+            if not C.pHit or not armed() then return orig(self, key) end
+            local okc, cls = pcall(function() return self.ClassName end)
+            if not (okc and cls == "Mouse") then return orig(self, key) end
+            if key ~= "Hit" and key ~= "Target" and key ~= "UnitRay"
+               and key ~= "X" and key ~= "Y" then
+                return orig(self, key)
             end
-            if not C.pHit or not armed() then return oldIndex(self, key) end
-
-            S.busy = true
-            local ok, out = pcall(function()
-                local cls = typeof(self) == "Instance" and self.ClassName or nil
-                if cls ~= "Mouse" then return nil end
-                local hp = aimPoint()
-                if not hp then return nil end
-                if key == "Target" then
-                    local p = S.tgt and S.tgt.part
-                    if p and p.Parent then return p end
-                    return nil
-                elseif key == "Hit" then
-                    return CFrame.new(hp)
-                else
-                    local cam = W.CurrentCamera
-                    if not cam then return nil end
-                    local origin = cam.CFrame.Position
-                    local d = hp - origin
-                    if d.Magnitude < 0.01 then return nil end
-                    return Ray.new(origin, d.Unit)
-                end
-            end)
-            S.busy = false
-            if ok and out ~= nil then
+            local hp = aimPoint()
+            if not hp then return orig(self, key) end
+            if key == "Hit" then
+                S.hit.c = S.hit.c + 1
                 S.hit.h = S.hit.h + 1
-                return out
+                return CFrame.new(hp)
+            elseif key == "Target" then
+                local p = S.tgt and S.tgt.part
+                if p and p.Parent then
+                    S.hit.c = S.hit.c + 1
+                    S.hit.h = S.hit.h + 1
+                    return p
+                end
+                return orig(self, key)
+            elseif key == "UnitRay" then
+                local cam = W.CurrentCamera
+                if not cam then return orig(self, key) end
+                local d = hp - cam.CFrame.Position
+                if d.Magnitude < 0.01 then return orig(self, key) end
+                S.hit.c = S.hit.c + 1
+                S.hit.h = S.hit.h + 1
+                return Ray.new(cam.CFrame.Position, d.Unit)
+            else
+                local sp = screenOf(S.tgt and S.tgt.part)
+                if sp then
+                    S.hit.c = S.hit.c + 1
+                    S.hit.h = S.hit.h + 1
+                    return key == "X" and sp.X or sp.Y
+                end
+                return orig(self, key)
             end
-            return oldIndex(self, key)
         end
 
-        S.index = { kind = "hmm", old = orig, detour = detour }
+        local okH, ret = pcall(hookmetamethod, game, "__index", wrapper)
+        if not okH or type(ret) ~= "function" then return false end
+        orig = ret
+        S.index = { kind = "hmm", old = orig, detour = wrapper }
         return true
     end
 
@@ -1408,28 +1428,22 @@ local __hs_ok, __hs_err = pcall(function()
     --=====================================================================
     local T = { current = nil, origin = Vector2.new(0, 0) }
 
+    -- v4: candidate cap removed. Every on-screen target inside the FOV gets
+    -- a visibility check, not just the first 8.
     local function pick(list)
         local cam = W.CurrentCamera
         if not cam then return nil end
         local origin = fovOrigin()
         T.origin = origin
         local best, bestD = nil, math.huge
-        local checks = 0
         for _, t in ipairs(list) do
             local want = (t.kind == "mob" and C.mobs) or (t.kind == "player" and C.players)
             if want and t.onScreen and t.dist <= C.maxDist then
-                if C.team and t.st == true then
-                    -- teammate
-                else
+                if not (C.team and t.st == true) then
                     local d = (t.screen - origin).Magnitude
                     if d <= C.fov and d < bestD then
                         if C.aimVis then
-                            checks = checks + 1
-                            if checks <= 8 then
-                                t.vis = visible(t)
-                            else
-                                t.vis = false
-                            end
+                            t.vis = visible(t)
                         else
                             t.vis = true
                         end
@@ -1500,15 +1514,15 @@ local __hs_ok, __hs_err = pcall(function()
         local lines = {}
         local function add(f, ...) lines[#lines + 1] = string.format(f, ...) end
         local gnm = getnamecallmethod or get_namecall_method
-        add("hs diag  t=%d esp=%d mobs=%d", #targets, espCount(), mobCached)
+        add("hs diag v4  t=%d esp=%d mobs=%d", #targets, espCount(), mobCached)
         add("exec gethui=%s hmm=%s hookfn=%s gnm=%s",
             tostring(type(gethui) == "function"),
             tostring(type(hookmetamethod) == "function"),
             tostring(type(hookfunction) == "function"),
             tostring(type(gnm) == "function"))
-        add("hook nc=%s ix=%s mod=%s gnmdead=%s",
+        add("hook nc=%s ix=%s mod=%s gnmdead=%s blind=%s",
             tostring(S.namecall ~= nil), tostring(S.index ~= nil),
-            tostring(S.module ~= nil), tostring(S.gnmDead))
+            tostring(S.module ~= nil), tostring(S.gnmDead), tostring(C.netBlind))
         add("nodes=%d  %s", nodesFound, containerSummary())
         add("cat %d/%d loc %d/%d ray %d/%d hit %d/%d net %d/%d",
             S.mp.h, S.mp.c, S.loc.h, S.loc.c, S.ray.h, S.ray.c,
@@ -1529,9 +1543,9 @@ local __hs_ok, __hs_err = pcall(function()
         end
         if shown == 0 then add("no remotes logged yet") end
         local text = table.concat(lines, "\n")
-        print("[hs] ==== diag ====")
+        print("[hs] ==== diag v4 ====")
         for _, l in ipairs(lines) do print("[hs] " .. l) end
-        print("[hs] ==============")
+        print("[hs] ==================")
         DiagBox.Text = text
         DiagBox.Visible = true
     end
@@ -1633,7 +1647,6 @@ local __hs_ok, __hs_err = pcall(function()
     bind(R.RenderStepped, function(dt)
         local ok, err = pcall(frame, dt)
         if not ok then
-            -- one bad frame must not look like "nothing works" forever
             if not S.lastErr or S.lastErr ~= tostring(err) then
                 S.lastErr = tostring(err)
                 warn("[hs] frame error: " .. S.lastErr)
@@ -1729,7 +1742,10 @@ local __hs_ok, __hs_err = pcall(function()
     mkToggle(Body, "Touch ray", C.pRay, function(v) C.pRay = v end)
     mkToggle(Body, "Mouse location", C.pLoc, function(v) C.pLoc = v end)
     mkToggle(Body, "GameUIMod.GetMousePos", C.pMouse, function(v) C.pMouse = v end)
-    mkToggle(Body, "Mouse.Hit / Target / UnitRay", C.pHit, function(v) C.pHit = v end)
+    mkToggle(Body, "Mouse.Hit / Target / UnitRay / X / Y", C.pHit, function(v)
+        C.pHit = v
+        syncIndex()
+    end)
     mkButton(Body, "Dump shot log to console", dumpLog)
 
     section("ESP")
@@ -1782,12 +1798,12 @@ local __hs_ok, __hs_err = pcall(function()
         pcall(installAll)
         pcall(discover)
         task.wait(3)
-        print("[hs] post-load diag")
+        print("[hs] post-load diag v4")
         pcall(diagnostics)
     end)
 
     overlay()
-    print("[hs] ready")
+    print("[hs] ready v4")
 end)
 
 if not __hs_ok then
