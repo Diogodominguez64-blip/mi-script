@@ -1,8 +1,18 @@
 -- Hypershot mobile menu - FOV / Aimbot / Silent Aim / ESP
--- Single file, executor side. No Drawing API. One ScreenGui (the panel only).
-
+-- Single file, executor side. No Drawing API. One ScreenGui (panel + overlay).
+--
+-- v2 fixes (see bench notes at the bottom of the ticket):
+--   * silent aim never fired because the namecall detour did not guard
+--     reentrancy and threw away every rewrite on the first nested call
+--   * FOV ring was drawn in viewport space while the mouse origin came from
+--     GetMouseLocation (screen space) - 36px vertical drift on every phone
+--   * target list was rebuilt at 6.7 Hz and the aim used the stale copy
+--   * camera mode applied the smooth lerp twice per frame
+--   * every remote with a Vector3 arg was rewritten, not just shot remotes
+--
 -- The whole load is wrapped. Any failure prints [hs] FATAL with the line
 -- number, copies it to the clipboard, and paints it on screen for 30s.
+
 local __hs_ok, __hs_err = pcall(function()
     print("[hs] start")
 
@@ -17,18 +27,25 @@ local __hs_ok, __hs_err = pcall(function()
 
     local C = {
         aim       = false,
-        mode      = "silent",
+        mode      = "silent",     -- "silent" | "camera"
         assist    = true,
-        fov       = 150,
+        fov       = 150,          -- radius in pixels, from fovOrigin
+        fovOrigin = "center",     -- "center" | "cursor"
         smooth    = 14,
         maxDist   = 700,
         mobs      = true,
         players   = true,
+        team      = true,         -- keep teammates out of the target list
+        hitPart   = "Head",       -- Head | Hitbox | Torso | UpperTorso | HumanoidRootPart | Any
+        pred      = 0,            -- lead, milliseconds
+        aimVis    = false,        -- require line of sight
+        hold      = false,        -- require the aim key / AIM button
 
         -- shot paths, each independently switchable
         pMouse    = true,    -- GameUIMod.GetMousePos  -> Vector3 world point
         pLoc      = true,    -- UIS:GetMouseLocation   -> Vector2 screen point
         pRay      = true,    -- Camera:ScreenPointToRay / ViewportPointToRay
+        pHit      = true,    -- Mouse.Hit / Mouse.Target / Mouse.UnitRay
         pNet      = true,    -- RemoteEvent:FireServer argument rewrite
 
         esp       = true,
@@ -41,6 +58,7 @@ local __hs_ok, __hs_err = pcall(function()
         espMobs   = true,
         espPlayers= true,
         ring      = true,
+        lockbox   = true,
     }
 
     local COL = {
@@ -89,7 +107,7 @@ local __hs_ok, __hs_err = pcall(function()
     local Gui = new("ScreenGui", {
         Name = "HS_Menu",
         ResetOnSpawn = false,
-        IgnoreGuiInset = true,
+        IgnoreGuiInset = true,       -- overlay coordinates == screen coordinates
         DisplayOrder = 9999,
         ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
     })
@@ -179,7 +197,7 @@ local __hs_ok, __hs_err = pcall(function()
             Parent = track,
         })
         corner(fill, 2)
-        local value = init
+        local value = math.clamp(init, min, max)
         local function paint()
             local a = (value - min) / (max - min)
             fill.Size = UDim2.new(a, 0, 1, 0)
@@ -190,26 +208,28 @@ local __hs_ok, __hs_err = pcall(function()
             local w = track.AbsoluteSize.X
             if w <= 0 then return end
             local a = math.clamp((px - abs) / w, 0, 1)
-            value = math.floor(min + (max - min) * a + 0.5)
+            local v = math.floor(min + (max - min) * a + 0.5)
+            if v == value then return end
+            value = v
             paint()
             cb(value)
         end
-        local dragging = false
+        local dragInput
         track.InputBegan:Connect(function(i)
             if i.UserInputType == Enum.UserInputType.MouseButton1
             or i.UserInputType == Enum.UserInputType.Touch then
-                dragging = true
+                dragInput = i
                 setFromX(i.Position.X)
             end
         end)
         track.InputEnded:Connect(function(i)
-            if i.UserInputType == Enum.UserInputType.MouseButton1
-            or i.UserInputType == Enum.UserInputType.Touch then
-                dragging = false
+            if dragInput and (i.UserInputType == Enum.UserInputType.MouseButton1
+            or i.UserInputType == Enum.UserInputType.Touch) then
+                dragInput = nil
             end
         end)
         U.InputChanged:Connect(function(i)
-            if not dragging then return end
+            if not dragInput then return end
             if i.UserInputType == Enum.UserInputType.MouseMovement
             or i.UserInputType == Enum.UserInputType.Touch then
                 setFromX(i.Position.X)
@@ -231,7 +251,7 @@ local __hs_ok, __hs_err = pcall(function()
             Parent = parent,
         })
         corner(b, 5)
-        b.MouseButton1Click:Connect(cb)
+        b.MouseButton1Click:Connect(function() cb(b) end)
         return b
     end
 
@@ -376,7 +396,7 @@ local __hs_ok, __hs_err = pcall(function()
     CloseBtn.MouseButton1Click:Connect(function() setPanel(false) end)
 
     --=====================================================================
-    -- FOV ring
+    -- Overlay: FOV ring, crosshair, lock box
     --=====================================================================
     local Ring = new("Frame", {
         Size = UDim2.new(0, 300, 0, 300),
@@ -386,33 +406,93 @@ local __hs_ok, __hs_err = pcall(function()
         Parent = Gui,
     })
     corner(Ring, 1000)
-    stroke(Ring, Color3.new(1, 1, 1), 1.5, 0.35)
+    local RingStroke = stroke(Ring, Color3.new(1, 1, 1), 1.5, 0.35)
 
-    local function syncRing()
-        local cam = W.CurrentCamera
-        if not cam then return end
-        local s = C.fov * 2
-        Ring.Size = UDim2.new(0, s, 0, s)
-        Ring.Position = UDim2.new(0.5, -C.fov, 0.5, -C.fov)
-        Ring.Visible = C.ring
-        local vp = cam.ViewportSize
-        if math.abs(vp.X * 0.5 - C.fov) > vp.X * 0.5
-        or math.abs(vp.Y * 0.5 - C.fov) > vp.Y * 0.5 then
-            Ring.Visible = false
-        end
-    end
+    local Cross = new("Frame", {
+        Size = UDim2.new(0, 4, 0, 4),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = Color3.new(1, 1, 1),
+        BackgroundTransparency = 0.2,
+        Visible = false,
+        Parent = Gui,
+    })
+    corner(Cross, 2)
+
+    local Lock = new("Frame", {
+        Size = UDim2.new(0, 26, 0, 26),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Visible = false,
+        Parent = Gui,
+    })
+    corner(Lock, 3)
+    stroke(Lock, COL.on, 1.5, 0.1)
+
+    -- Functional toggle stays in the panel; the raspberry pi answer to a
+    -- keyboard-only feature is a button that is always reachable by thumb.
+    local AimBtn = new("TextButton", {
+        Size = UDim2.new(0, 46, 0, 46),
+        Position = UDim2.new(0, 14, 0.5, 32),
+        BackgroundColor3 = COL.bg,
+        Text = "AIM",
+        TextSize = 11,
+        Font = Enum.Font.GothamBold,
+        TextColor3 = COL.dim,
+        AutoButtonColor = false,
+        Visible = false,
+        Parent = Gui,
+    })
+    corner(AimBtn, 23)
+    stroke(AimBtn, COL.off, 1.5)
 
     --=====================================================================
     -- Targeting
     --=====================================================================
+    local MAXT = 96
+
+    local function isHitboxName(n)
+        return n == "Head" or n == "Hitbox" or n == "HitBox"
+            or n == "Torso" or n == "UpperTorso"
+            or n == "HumanoidRootPart" or n == "Chest"
+    end
+
+    local function firstPart(list)
+        for _, d in ipairs(list) do
+            if d:IsA("BasePart") then return d end
+        end
+        return nil
+    end
+
+    -- Two levels only. Full GetDescendants on a 40-part mob model every scan
+    -- is the mobile frame drop, and the hitbox is never deeper than that.
     local function partOf(model)
         if not model then return nil end
-        local h = model:FindFirstChild("Head")
-        if h and h:IsA("BasePart") then return h end
-        local r = model:FindFirstChild("HumanoidRootPart")
-        if r and r:IsA("BasePart") then return r end
-        for _, d in ipairs(model:GetChildren()) do
-            if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" then return d end
+        local want = C.hitPart
+        if want and want ~= "Any" then
+            local d = model:FindFirstChild(want)
+            if d and d:IsA("BasePart") then return d end
+            for _, c in ipairs(model:GetChildren()) do
+                if c:IsA("Folder") or c:IsA("Model") then
+                    local g = c:FindFirstChild(want)
+                    if g and g:IsA("BasePart") then return g end
+                end
+            end
+        end
+        local head = model:FindFirstChild("Head")
+        if head and head:IsA("BasePart") then return head end
+        local root = model:FindFirstChild("HumanoidRootPart")
+        if root and root:IsA("BasePart") then return root end
+        local kids = model:GetChildren()
+        for _, d in ipairs(kids) do
+            if d:IsA("BasePart") and isHitboxName(d.Name) then return d end
+        end
+        local flat = firstPart(kids)
+        if flat then return flat end
+        for _, c in ipairs(kids) do
+            if c:IsA("Folder") or c:IsA("Model") then
+                local p = firstPart(c:GetChildren())
+                if p then return p end
+            end
         end
         return nil
     end
@@ -420,7 +500,12 @@ local __hs_ok, __hs_err = pcall(function()
     local function alive(model)
         if not model or not model.Parent then return false end
         local h = model:FindFirstChildOfClass("Humanoid")
-        if h and h.Health <= 0 then return false end
+        if h then
+            local okh, hp = pcall(function() return h.Health end)
+            if okh and type(hp) == "number" and hp <= 0 then return false end
+        end
+        local okA, attr = pcall(function() return model:GetAttribute("Health") end)
+        if okA and type(attr) == "number" and attr <= 0 then return false end
         return true
     end
 
@@ -443,61 +528,166 @@ local __hs_ok, __hs_err = pcall(function()
         return nil
     end
 
-    local MAXT = 64
+    local CONTAINERS = { "Mobs", "Enemies", "Monsters", "NPCs", "Dummies" }
+
     local targets = {}
     local esp = {}
     local scanClock = 0
-    local scanEvery = 0.15
+    local scanEvery = 0.05        -- collect() rate; projection runs every frame
+
+    local function harvest(container, kind, out, depth)
+        if depth > 2 then return end
+        for _, m in ipairs(container:GetChildren()) do
+            if #out >= MAXT then return end
+            if m:IsA("Model") then
+                local ok, rec = pcall(function()
+                    if not alive(m) then return nil end
+                    local part = partOf(m)
+                    if not part then return nil end
+                    return { model = m, part = part, kind = kind }
+                end)
+                if ok and rec then out[#out + 1] = rec end
+            elseif m:IsA("Folder") then
+                harvest(m, kind, out, depth + 1)
+            end
+        end
+    end
 
     local function collect()
         local out = {}
-        local function add(model, kind)
-            if #out >= MAXT then return end
-            local ok, rec = pcall(function()
-                if not alive(model) then return nil end
-                local part = partOf(model)
-                if not part then return nil end
-                return { model = model, part = part, kind = kind }
-            end)
-            if ok and rec then out[#out + 1] = rec end
-        end
-
         if C.mobs then
-            local folder = W:FindFirstChild("Mobs")
-            if folder then
-                for _, m in ipairs(folder:GetChildren()) do add(m, "mob") end
+            for _, name in ipairs(CONTAINERS) do
+                local folder = W:FindFirstChild(name)
+                if folder then harvest(folder, "mob", out, 0) end
             end
         end
         if C.players then
             for _, pl in ipairs(P:GetPlayers()) do
-                if pl ~= LP and pl.Character then add(pl.Character, "player") end
+                if pl ~= LP and pl.Character then
+                    local ch = pl.Character
+                    local ok, rec = pcall(function()
+                        if not alive(ch) then return nil end
+                        local part = partOf(ch)
+                        if not part then return nil end
+                        return { model = ch, part = part, kind = "player" }
+                    end)
+                    if ok and rec then out[#out + 1] = rec end
+                end
             end
         end
         return out
     end
 
+    local MAX_SCREEN = 9000
+
     local function project(list)
         local cam = W.CurrentCamera
         if not cam then return list end
-        local vp = cam.ViewportSize
-        local cx, cy = vp.X * 0.5, vp.Y * 0.5
         local eye = cam.CFrame.Position
-        local center = Vector2.new(cx, cy)
         for _, t in ipairs(list) do
             local p = t.part.Position
             t.dist = (p - eye).Magnitude
-            local sp, on = cam:WorldToViewportPoint(p)
-            if on and sp.Z > 0 then
+            local sp, on = cam:WorldToScreenPoint(p)
+            if on and sp.Z > 0
+            and sp.X > -MAX_SCREEN and sp.X < MAX_SCREEN
+            and sp.Y > -MAX_SCREEN and sp.Y < MAX_SCREEN then
                 t.screen = Vector2.new(sp.X, sp.Y)
                 t.onScreen = true
-                t.centerDist = (t.screen - center).Magnitude
             else
                 t.onScreen = false
-                t.centerDist = math.huge
+                t.screen = nil
             end
             t.st = sameTeam(t.model)
         end
         return list
+    end
+
+    --=====================================================================
+    -- Aim state
+    --=====================================================================
+    local S = {
+        tgt   = nil,
+        busy  = false,      -- reentrancy guard: detours must never nest
+        raw   = false,      -- force a detour to pass the original value through
+        mp    = { h = 0, c = 0 },
+        loc   = { h = 0, c = 0 },
+        ray   = { h = 0, c = 0 },
+        hit   = { h = 0, c = 0 },
+        net   = { h = 0, c = 0 },
+        log   = {},
+        order = {},
+        module = nil,
+        origFn = nil,
+        hookFn = nil,
+        inst  = false,
+        namecall = nil,
+        index = nil,
+    }
+
+    local holdAim = false
+
+    local function fovOrigin()
+        local cam = W.CurrentCamera
+        local vp = (cam and cam.ViewportSize) or Vector2.new(1280, 720)
+        if C.fovOrigin == "cursor" then
+            local okp, p = pcall(function()
+                S.raw = true
+                local loc = U:GetMouseLocation()
+                S.raw = false
+                return loc
+            end)
+            S.raw = false
+            if okp and typeof(p) == "Vector2" then return p end
+        end
+        return Vector2.new(vp.X * 0.5, vp.Y * 0.5)
+    end
+
+    local function screenOf(part)
+        local cam = W.CurrentCamera
+        if not cam or not part then return nil end
+        local sp, on = cam:WorldToScreenPoint(part.Position)
+        if on and sp.Z > 0 then return Vector2.new(sp.X, sp.Y) end
+        return nil
+    end
+
+    local function aimPoint()
+        local t = S.tgt
+        local p = t and t.part
+        if not p or not p.Parent then return nil end
+        if C.pred > 0 then
+            local okv, v = pcall(function() return p.AssemblyLinearVelocity end)
+            if okv and typeof(v) == "Vector3" then
+                return p.Position + v * (C.pred / 1000)
+            end
+        end
+        return p.Position
+    end
+
+    local function armed()
+        if not C.aim then return false end
+        if C.hold and not holdAim then return false end
+        if not S.tgt then return false end
+        if C.aimVis and S.tgt.vis == false then return false end
+        if C.mode == "silent" then return true end
+        return C.assist or C.mode == "camera"
+    end
+
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Exclude
+    rp.IgnoreWater = true
+
+    local function visible(t)
+        local cam = W.CurrentCamera
+        if not cam then return true end
+        local filter = {}
+        if LP.Character then filter[#filter + 1] = LP.Character end
+        if t.model then filter[#filter + 1] = t.model end
+        rp.FilterDescendantsInstances = filter
+        local ok, res = pcall(function()
+            return W:Raycast(cam.CFrame.Position, t.part.Position - cam.CFrame.Position, rp)
+        end)
+        if not ok then return true end
+        return res == nil
     end
 
     --=====================================================================
@@ -510,34 +700,8 @@ local __hs_ok, __hs_err = pcall(function()
     --           Camera:ViewportPointToRay
     --   pLoc    UIS:GetMouseLocation       -> Vector2 screen point
     --   pMouse  GameUIMod.GetMousePos      -> Vector3 world point
+    --   pHit    Mouse.Hit / Target / UnitRay
     --=====================================================================
-    local S = {
-        tgt   = nil,
-        inst  = false,
-        mp    = { h = 0, c = 0 },
-        loc   = { h = 0, c = 0 },
-        ray   = { h = 0, c = 0 },
-        net   = { h = 0, c = 0 },
-        log   = {},
-        order = {},
-        module = nil,
-        origFn = nil,
-        namecall = nil,
-    }
-
-    local function armed()
-        if not C.aim then return false end
-        if C.mode == "silent" then return true end
-        return C.assist
-    end
-
-    local function headPos()
-        local t = S.tgt
-        local p = t and t.part
-        if p and p.Parent then return p.Position end
-        return nil
-    end
-
     local function logShot(name, args, n)
         local parts = {}
         for i = 1, n do parts[i] = typeof(args[i]) end
@@ -566,13 +730,23 @@ local __hs_ok, __hs_err = pcall(function()
 
     -- One Vector3 rewrite at most, plus one direction rewrite. A magnitude near
     -- 1 is treated as a unit direction and re-aimed from the camera; anything
-    -- further out is treated as a world point and swapped for the head.
+    -- further out is treated as a world point and swapped for the head. A
+    -- CFrame is rebuilt looking at the head. A triple of numbers is only
+    -- touched when it actually reads as a direction.
     local function retargetArgs(args, n)
-        local hp = headPos()
+        local hp = aimPoint()
         if not hp then return nil end
         local cam = W.CurrentCamera
         local eye = cam and cam.CFrame.Position or nil
         local changed = 0
+
+        local function dirFrom(v)
+            if not eye then return nil end
+            local d = hp - eye
+            if d.Magnitude <= 0.01 then return nil end
+            return d.Unit
+        end
+
         for i = 1, n do
             if changed >= 2 then break end
             local v = args[i]
@@ -580,16 +754,14 @@ local __hs_ok, __hs_err = pcall(function()
             if tv == "Vector3" then
                 local m = v.Magnitude
                 if m > 0.5 and m < 1.5 then
-                    if eye then
-                        local d = hp - eye
-                        if d.Magnitude > 0.01 then
-                            args[i] = d.Unit
-                            changed = changed + 1
-                        end
+                    local d = dirFrom(v)
+                    if d then
+                        args[i] = d
+                        changed = changed + 1
                     end
                 elseif eye then
                     local d = (v - eye).Magnitude
-                    if d > 8 and d <= C.maxDist + 100 then
+                    if d > 4 and d <= C.maxDist + 250 then
                         args[i] = hp
                         changed = changed + 1
                     end
@@ -597,6 +769,19 @@ local __hs_ok, __hs_err = pcall(function()
             elseif tv == "CFrame" then
                 args[i] = CFrame.lookAt(v.Position, hp)
                 changed = changed + 1
+            elseif tv == "number" and i + 2 <= n then
+                local b, c = args[i + 1], args[i + 2]
+                if typeof(b) == "number" and typeof(c) == "number" then
+                    local guess = Vector3.new(v, b, c)
+                    local gm = guess.Magnitude
+                    if gm > 0.5 and gm < 1.5 then
+                        local d = dirFrom(guess)
+                        if d then
+                            args[i], args[i + 1], args[i + 2] = d.X, d.Y, d.Z
+                            changed = changed + 1
+                        end
+                    end
+                end
             end
         end
         if changed > 0 then return args, n end
@@ -614,57 +799,60 @@ local __hs_ok, __hs_err = pcall(function()
     local function makeDetour(old, gnm)
         local unpackFn = table.unpack or unpack
         return function(self, ...)
+            -- Nested call: the original function itself re-entered the
+            -- metamethod. Anything other than a straight pass-through here
+            -- recurses until the executor kills the thread - which is why the
+            -- old build looked like "silent aim does nothing".
+            if S.busy or S.raw then return old(self, ...) end
+
             local m = gnm()
-            if not WANT[m] then return old(self, ...) end
+            if not m or not WANT[m] then return old(self, ...) end
 
             if m == "GetMouseLocation" then
-                if C.pLoc and self == U then
+                if C.pLoc and self == U and armed() then
                     S.loc.c = S.loc.c + 1
-                    local hp = headPos()
-                    if armed() and hp then
-                        local cam = W.CurrentCamera
-                        if cam then
-                            local sp, on = cam:WorldToViewportPoint(hp)
-                            if on then
-                                S.loc.h = S.loc.h + 1
-                                return Vector2.new(sp.X, sp.Y)
-                            end
-                        end
+                    local sp = screenOf(S.tgt.part)
+                    if sp then
+                        S.loc.h = S.loc.h + 1
+                        return sp
                     end
                 end
                 return old(self, ...)
             end
 
             if m == "ScreenPointToRay" or m == "ViewportPointToRay" then
-                local ray = old(self, ...)
-                if C.pRay and self == W.CurrentCamera then
+                if C.pRay and self == W.CurrentCamera and armed() then
                     S.ray.c = S.ray.c + 1
-                    local hp = headPos()
-                    if armed() and hp and type(ray) == "table" and ray.Origin then
-                        local dir = hp - ray.Origin
-                        if dir.Magnitude > 0.01 then
+                    local ray = old(self, ...)
+                    local hp = aimPoint()
+                    if hp and type(ray) == "table" and ray.Origin then
+                        local d = hp - ray.Origin
+                        if d.Magnitude > 0.01 then
                             S.ray.h = S.ray.h + 1
-                            return Ray.new(ray.Origin, dir.Unit * math.max(ray.Direction.Magnitude, 1))
+                            return Ray.new(ray.Origin,
+                                           d.Unit * math.max(ray.Direction.Magnitude, 1))
                         end
                     end
+                    return ray
                 end
-                return ray
+                return old(self, ...)
             end
 
             -- FireServer / InvokeServer
             local n = select("#", ...)
             local args = { ... }
-            local nm = tostring(self.Name)
-            logShot(nm, args, n)
-            S.net.c = S.net.c + 1
-            if C.pNet and armed() then
-                local na, nn = retargetArgs(args, n)
-                if na then
-                    S.net.h = S.net.h + 1
-                    return old(self, unpackFn(na, 1, nn))
-                end
-            end
-            return old(self, ...)
+            pcall(logShot, tostring(self.Name), args, n)
+            if not C.pNet or not armed() then return old(self, ...) end
+
+            S.busy = true
+            local ok, na, nn = pcall(retargetArgs, args, n)
+            S.busy = false
+            if not (ok and na) then return old(self, ...) end
+
+            S.busy = true
+            local res = table.pack(old(self, unpackFn(na, 1, nn)))
+            S.busy = false
+            return unpackFn(res, 1, res.n)
         end
     end
 
@@ -673,9 +861,6 @@ local __hs_ok, __hs_err = pcall(function()
         local gnm = getnamecallmethod or get_namecall_method
         if type(gnm) ~= "function" then return false end
 
-        -- Preferred: hookmetamethod returns the original in one step. Both the
-        -- original and the real detour are forward-declared locals so the
-        -- wrapper's upvalues bind to them, not to globals.
         if type(hookmetamethod) == "function" then
             local oldNamecall = nil
             local detour = nil
@@ -692,7 +877,6 @@ local __hs_ok, __hs_err = pcall(function()
             end
         end
 
-        -- Fallback: raw metatable swap.
         if type(getrawmetatable) ~= "function" then return false end
         local ok, mt = pcall(getrawmetatable, game)
         if not ok or type(mt) ~= "table" then return false end
@@ -712,6 +896,72 @@ local __hs_ok, __hs_err = pcall(function()
 
         S.namecall = { kind = "mt", mt = mt, old = old, detour = detour }
         return true
+    end
+
+    local function installIndex()
+        if S.index then return true end
+        if type(hookmetamethod) ~= "function" then return false end
+
+        local oldIndex = nil
+        local detour = nil
+        local wrapper = function(self, key)
+            if not detour then return oldIndex(self, key) end
+            return detour(self, key)
+        end
+
+        local okH, orig = pcall(hookmetamethod, game, "__index", wrapper)
+        if not okH or type(orig) ~= "function" then return false end
+        oldIndex = orig
+
+        detour = function(self, key)
+            if S.busy or S.raw then return oldIndex(self, key) end
+            if key ~= "Hit" and key ~= "Target" and key ~= "UnitRay" then
+                return oldIndex(self, key)
+            end
+            if not C.pHit or not armed() then return oldIndex(self, key) end
+
+            S.busy = true
+            local ok, out = pcall(function()
+                local cls = typeof(self) == "Instance" and self.ClassName or nil
+                if cls ~= "Mouse" then return nil end
+                local hp = aimPoint()
+                if not hp then return nil end
+                if key == "Target" then
+                    local p = S.tgt and S.tgt.part
+                    if p and p.Parent then
+                        S.hit.h = S.hit.h + 1
+                        return p
+                    end
+                    return nil
+                elseif key == "Hit" then
+                    S.hit.h = S.hit.h + 1
+                    return CFrame.new(hp)
+                else
+                    local cam = W.CurrentCamera
+                    if not cam then return nil end
+                    local origin = cam.CFrame.Position
+                    local d = hp - origin
+                    if d.Magnitude < 0.01 then return nil end
+                    S.hit.h = S.hit.h + 1
+                    return Ray.new(origin, d.Unit)
+                end
+            end)
+            S.busy = false
+            if ok and out ~= nil then return out end
+            return oldIndex(self, key)
+        end
+
+        S.index = { kind = "hmm", old = orig, detour = detour }
+        return true
+    end
+
+    local function uninstallIndex()
+        local ix = S.index
+        if not ix then return end
+        S.index = nil
+        if type(hookmetamethod) == "function" then
+            pcall(hookmetamethod, game, "__index", ix.old)
+        end
     end
 
     local function uninstallNamecall()
@@ -758,24 +1008,20 @@ local __hs_ok, __hs_err = pcall(function()
         S.origFn = f
 
         local function detour(...)
+            if S.busy or S.raw then return f(...) end
             local a, b, c = f(...)
+            if not (C.pMouse and armed()) then return a, b, c end
             S.mp.c = S.mp.c + 1
-            if C.pMouse and armed() then
-                local hp = headPos()
-                if hp then
-                    if typeof(a) == "Vector3" then
-                        S.mp.h = S.mp.h + 1
-                        return hp
-                    elseif typeof(a) == "Vector2" then
-                        local cam = W.CurrentCamera
-                        if cam then
-                            local sp, on = cam:WorldToViewportPoint(hp)
-                            if on then
-                                S.mp.h = S.mp.h + 1
-                                return Vector2.new(sp.X, sp.Y)
-                            end
-                        end
-                    end
+            local hp = aimPoint()
+            if not hp then return a, b, c end
+            if typeof(a) == "Vector3" then
+                S.mp.h = S.mp.h + 1
+                return hp
+            elseif typeof(a) == "Vector2" then
+                local sp = screenOf(S.tgt.part)
+                if sp then
+                    S.mp.h = S.mp.h + 1
+                    return sp
                 end
             end
             return a, b, c
@@ -785,34 +1031,53 @@ local __hs_ok, __hs_err = pcall(function()
             local okh, orig = pcall(hookfunction, f, detour)
             if okh and type(orig) == "function" then
                 S.origFn = orig
+                S.hookFn = detour
                 S.inst = true
                 return true
             end
         end
         if pcall(function() t.GetMousePos = detour end) then
+            S.hookFn = detour
             S.inst = true
             return true
         end
         return false
     end
 
+    -- __index is the one hook that runs on every property read in the game.
+    -- Keep it installed only while pHit is on; a phone does not have the
+    -- frame budget for a Lua trampoline on every Vector3 access.
+    local function syncIndex()
+        if C.pHit then
+            if not S.index then installIndex() end
+        else
+            if S.index then uninstallIndex() end
+        end
+    end
+
     local function installAll()
         installNamecall()
+        syncIndex()
         installMouse()
     end
 
     local function uninstall()
         uninstallNamecall()
-        if S.module and S.origFn then
-            if type(restorefunction) == "function" and S.inst then
-                pcall(restorefunction, S.origFn)
+        uninstallIndex()
+        if S.module then
+            if S.hookFn and type(restorefunction) == "function" then
+                pcall(restorefunction, S.hookFn)
             end
-            pcall(function() S.module.GetMousePos = S.origFn end)
+            if S.origFn then
+                pcall(function() S.module.GetMousePos = S.origFn end)
+            end
         end
         S.module = nil
         S.origFn = nil
+        S.hookFn = nil
         S.inst = false
         S.tgt = nil
+        S.busy = false
     end
 
     --=====================================================================
@@ -850,68 +1115,65 @@ local __hs_ok, __hs_err = pcall(function()
         local part = t.part
         local rec = {}
 
-        if C.espName or C.espDist or C.espHp then
-            local bb = new("BillboardGui", {
-                Name = "hs_bb",
-                Size = UDim2.new(0, 170, 0, 54),
-                StudsOffset = Vector3.new(0, 2.2, 0),
-                AlwaysOnTop = true,
-                MaxDistance = C.espMax,
-                Adornee = part,
-                Parent = part,
-            })
-            rec.bb = bb
-            rec.name = new("TextLabel", {
-                Size = UDim2.new(1, 0, 0, 15),
-                BackgroundTransparency = 1,
-                Font = Enum.Font.GothamBold,
-                TextSize = 13,
-                TextColor3 = colour(t),
-                TextStrokeTransparency = 0.4,
-                Text = model.Name,
-                Visible = C.espName,
-                Parent = bb,
-            })
-            rec.dist = new("TextLabel", {
-                Size = UDim2.new(1, 0, 0, 13),
-                Position = UDim2.new(0, 0, 0, 15),
-                BackgroundTransparency = 1,
-                Font = Enum.Font.Code,
-                TextSize = 11,
-                TextColor3 = COL.txt,
-                TextStrokeTransparency = 0.4,
-                Text = "",
-                Visible = C.espDist,
-                Parent = bb,
-            })
-            rec.bar = new("Frame", {
-                Size = UDim2.new(1, -40, 0, 4),
-                Position = UDim2.new(0, 20, 0, 30),
-                BackgroundColor3 = Color3.fromRGB(40, 40, 48),
-                Visible = C.espHp,
-                Parent = bb,
-            })
-            corner(rec.bar, 2)
-            rec.fill = new("Frame", {
-                Size = UDim2.new(1, 0, 1, 0),
-                BackgroundColor3 = COL.on,
-                Parent = rec.bar,
-            })
-            corner(rec.fill, 2)
-        end
+        local bb = new("BillboardGui", {
+            Name = "hs_bb",
+            Size = UDim2.new(0, 170, 0, 46),
+            StudsOffset = Vector3.new(0, 2.2, 0),
+            AlwaysOnTop = true,
+            MaxDistance = C.espMax,
+            Adornee = part,
+            Parent = part,
+        })
+        rec.bb = bb
+        rec.name = new("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 15),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            TextSize = 13,
+            TextColor3 = colour(t),
+            TextStrokeTransparency = 0.4,
+            Text = model.Name,
+            Visible = C.espName,
+            Parent = bb,
+        })
+        rec.dist = new("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 13),
+            Position = UDim2.new(0, 0, 0, 15),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.Code,
+            TextSize = 11,
+            TextColor3 = COL.txt,
+            TextStrokeTransparency = 0.4,
+            Text = "",
+            Visible = C.espDist,
+            Parent = bb,
+        })
+        rec.bar = new("Frame", {
+            Size = UDim2.new(1, -40, 0, 4),
+            Position = UDim2.new(0, 20, 0, 30),
+            BackgroundColor3 = Color3.fromRGB(40, 40, 48),
+            Visible = C.espHp,
+            Parent = bb,
+        })
+        corner(rec.bar, 2)
+        rec.fill = new("Frame", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundColor3 = COL.on,
+            Parent = rec.bar,
+        })
+        corner(rec.fill, 2)
 
-        if C.espChams then
-            rec.hl = new("Highlight", {
-                Name = "hs_hl",
-                FillColor = colour(t),
-                FillTransparency = 0.72,
-                OutlineColor = colour(t),
-                OutlineTransparency = 0.2,
-                DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
-                Adornee = model,
-                Parent = model,
-            })
-        end
+        rec.hl = new("Highlight", {
+            Name = "hs_hl",
+            FillColor = colour(t),
+            FillTransparency = 0.72,
+            OutlineColor = colour(t),
+            OutlineTransparency = 0.2,
+            DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
+            Adornee = model,
+            Enabled = C.espChams,
+            Parent = model,
+        })
 
         if C.espLine then
             ensureTracer()
@@ -965,18 +1227,39 @@ local __hs_ok, __hs_err = pcall(function()
                         if rec.name then
                             rec.name.Text = t.model.Name
                             rec.name.TextColor3 = colour(t)
+                            rec.name.Visible = C.espName
                         end
-                        if rec.dist then rec.dist.Text = string.format("%d m", math.floor(t.dist)) end
+                        if rec.dist then
+                            rec.dist.Text = string.format("%d m", math.floor(t.dist))
+                            rec.dist.Visible = C.espDist
+                        end
+                        if rec.bar then rec.bar.Visible = C.espHp end
                         if rec.fill then
                             local h = t.model:FindFirstChildOfClass("Humanoid")
                             local frac = 1
-                            if h and h.MaxHealth > 0 then frac = math.clamp(h.Health / h.MaxHealth, 0, 1) end
+                            if h then
+                                local okh, mx = pcall(function() return h.MaxHealth end)
+                                if okh and mx and mx > 0 then
+                                    frac = math.clamp(h.Health / mx, 0, 1)
+                                end
+                            end
                             rec.fill.Size = UDim2.new(frac, 0, 1, 0)
                             rec.fill.BackgroundColor3 = frac > 0.5 and COL.on
                                 or (frac > 0.2 and COL.mob or COL.enemy)
                         end
-                        if rec.hl then rec.hl.FillColor = colour(t) end
-                        if rec.beam then rec.beam.Color = ColorSequence.new(colour(t)) end
+                        if rec.hl then
+                            rec.hl.FillColor = colour(t)
+                            rec.hl.OutlineColor = colour(t)
+                            rec.hl.Enabled = C.espChams
+                        end
+                        if rec.beam then
+                            if not C.espLine then
+                                rec.beam.Enabled = false
+                            else
+                                rec.beam.Enabled = true
+                                rec.beam.Color = ColorSequence.new(colour(t))
+                            end
+                        end
                     end
                 end
             end
@@ -993,23 +1276,41 @@ local __hs_ok, __hs_err = pcall(function()
     --=====================================================================
     -- Aimbot
     --=====================================================================
-    local T = { current = nil }
+    local T = { current = nil, origin = Vector2.new(0, 0) }
 
     local function pick(list)
         local cam = W.CurrentCamera
         if not cam then return nil end
-        local vp = cam.ViewportSize
-        local center = Vector2.new(vp.X * 0.5, vp.Y * 0.5)
+        local origin = fovOrigin()
+        T.origin = origin
         local best, bestD = nil, math.huge
+        local checks = 0
         for _, t in ipairs(list) do
             local want = (t.kind == "mob" and C.mobs) or (t.kind == "player" and C.players)
             if want and t.onScreen and t.dist <= C.maxDist then
-                if t.centerDist <= C.fov and t.centerDist < bestD then
-                    best, bestD = t, t.centerDist
+                if C.team and t.st == true then
+                    -- teammate, skip
+                else
+                    local d = (t.screen - origin).Magnitude
+                    if d <= C.fov and d < bestD then
+                        if C.aimVis then
+                            checks = checks + 1
+                            if checks <= 8 then
+                                t.vis = visible(t)
+                            else
+                                t.vis = false
+                            end
+                        else
+                            t.vis = true
+                        end
+                        if t.vis ~= false then
+                            best, bestD = t, d
+                        end
+                    end
                 end
             end
         end
-        return best, center
+        return best
     end
 
     local BIND = "hs_camera_aim"
@@ -1017,13 +1318,14 @@ local __hs_ok, __hs_err = pcall(function()
 
     local function applyAim(dt)
         if not C.aim or C.mode ~= "camera" then return end
+        if C.hold and not holdAim then return end
         local t = T.current
         local cam = W.CurrentCamera
         if not t or not cam then return end
-        local part = t.part
-        if not part or not part.Parent then return end
+        local hp = aimPoint()
+        if not hp then return end
         local cf = cam.CFrame
-        local goal = CFrame.lookAt(cf.Position, part.Position)
+        local goal = CFrame.lookAt(cf.Position, hp)
         local a = math.clamp((dt or 0.016) * C.smooth, 0.08, 1)
         cam.CFrame = cf:Lerp(goal, a)
     end
@@ -1047,6 +1349,31 @@ local __hs_ok, __hs_err = pcall(function()
 
     local statusClock = 0
 
+    local function overlay()
+        local cam = W.CurrentCamera
+        if not cam then return end
+        local origin = T.origin
+        local locked = S.tgt ~= nil and armed()
+
+        Ring.Size = UDim2.new(0, C.fov * 2, 0, C.fov * 2)
+        Ring.AnchorPoint = Vector2.new(0.5, 0.5)
+        Ring.Position = UDim2.new(0, origin.X, 0, origin.Y)
+        Ring.Visible = C.ring
+        RingStroke.Color = locked and COL.on or Color3.new(1, 1, 1)
+        RingStroke.Transparency = locked and 0.1 or 0.35
+
+        Cross.Position = UDim2.new(0, origin.X, 0, origin.Y)
+        Cross.Visible = C.ring
+
+        local sp = S.tgt and S.tgt.screen
+        Lock.Visible = C.lockbox and locked and sp ~= nil
+        if Lock.Visible then
+            Lock.Position = UDim2.new(0, sp.X, 0, sp.Y)
+        end
+        AimBtn.BackgroundColor3 = holdAim and COL.on or COL.bg
+        AimBtn.TextColor3 = holdAim and Color3.new(0, 0, 0) or COL.dim
+    end
+
     bind(R.RenderStepped, function(dt)
         local cam = W.CurrentCamera
         if not cam then return end
@@ -1058,8 +1385,9 @@ local __hs_ok, __hs_err = pcall(function()
         scanClock = scanClock + dt
         if scanClock >= scanEvery then
             scanClock = 0
-            targets = project(collect())
+            targets = collect()
         end
+        project(targets)      -- fresh screen data every frame, no 150ms staleness
 
         renderEsp(targets)
 
@@ -1069,28 +1397,60 @@ local __hs_ok, __hs_err = pcall(function()
 
         if C.aim and C.mode == "camera" then
             if not bound then tryBind() end
-            applyAim(dt)
+            -- applyAim runs from BindToRenderStep only. Calling it here too was
+            -- doubling the lerp every frame (inconsistent smooth, overshoot).
         end
+
+        overlay()
 
         statusClock = statusClock + dt
         if statusClock >= 0.4 then
             statusClock = 0
             if not S.namecall then installNamecall() end
+            syncIndex()
             if not S.module then installMouse() end
-            syncRing()
-            local live = S.net.h + S.ray.h + S.loc.h + S.mp.h
+            local live = S.net.h + S.ray.h + S.loc.h + S.mp.h + S.hit.h
+            local tname = t and t.model and t.model.Name or "-"
             Status.Text = string.format(
-                "t%d e%d  %s %s\nmp %d/%d loc %d/%d ray %d/%d net %d/%d",
-                #targets, (function() local n = 0 for _ in pairs(esp) do n = n + 1 end return n end)(),
-                S.namecall and "NC" or "nc-", S.module and "MOD" or "mod-",
-                S.mp.h, S.mp.c, S.loc.h, S.loc.c,
-                S.ray.h, S.ray.c, S.net.h, S.net.c)
+                "%s fov%d tgt %s\nt%d  mp %d/%d loc %d/%d ray %d/%d hit %d/%d net %d/%d",
+                (S.namecall and "NC " or "nc- ") .. (S.index and "IX " or "ix- ") .. (S.module and "MOD" or "mod-"),
+                math.floor(C.fov), tname,
+                #targets, S.mp.h, S.mp.c, S.loc.h, S.loc.c,
+                S.ray.h, S.ray.c, S.hit.h, S.hit.c, S.net.h, S.net.c)
             Status.TextColor3 = live > 0 and COL.on or COL.dim
         end
     end)
 
     bind(LP.CharacterAdded, function()
+        task.wait(0.5)
         installAll()
+    end)
+
+    --=====================================================================
+    -- Input: hold-to-aim (E on keyboard, AIM button on touch)
+    --=====================================================================
+    local AIM_KEY = Enum.KeyCode.E
+
+    bind(U.InputBegan, function(i, gp)
+        if gp then return end
+        if C.hold and i.KeyCode == AIM_KEY then holdAim = true end
+    end)
+    bind(U.InputEnded, function(i, gp)
+        if gp then return end
+        if i.KeyCode == AIM_KEY then holdAim = false end
+    end)
+
+    AimBtn.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.Touch
+        or i.UserInputType == Enum.UserInputType.MouseButton1 then
+            holdAim = true
+        end
+    end)
+    AimBtn.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.Touch
+        or i.UserInputType == Enum.UserInputType.MouseButton1 then
+            holdAim = false
+        end
     end)
 
     --=====================================================================
@@ -1102,19 +1462,41 @@ local __hs_ok, __hs_err = pcall(function()
         C.mode = v and "silent" or "camera"
         T.current = nil
     end)
-    mkSlider(Body, "FOV radius", 30, 500, C.fov, function(v) C.fov = v end)
+    mkSlider(Body, "FOV radius", 20, 800, C.fov, function(v) C.fov = v end)
+    mkToggle(Body, "FOV from cursor", C.fovOrigin == "cursor", function(v)
+        C.fovOrigin = v and "cursor" or "center"
+    end)
     mkSlider(Body, "Smooth", 1, 40, C.smooth, function(v) C.smooth = v end)
     mkSlider(Body, "Max distance", 100, 2000, C.maxDist, function(v) C.maxDist = v end)
+    mkSlider(Body, "Prediction (ms)", 0, 200, C.pred, function(v) C.pred = v end)
+    mkToggle(Body, "Hold key to aim (E / AIM)", C.hold, function(v)
+        C.hold = v
+        AimBtn.Visible = v
+        if not v then holdAim = false end
+    end)
+    mkToggle(Body, "Wall check", C.aimVis, function(v) C.aimVis = v end)
+    mkToggle(Body, "Team check", C.team, function(v) C.team = v end)
     mkToggle(Body, "Target mobs", C.mobs, function(v) C.mobs = v end)
     mkToggle(Body, "Target players", C.players, function(v) C.players = v end)
     mkToggle(Body, "Retarget shots in camera mode", C.assist, function(v) C.assist = v end)
     mkToggle(Body, "Show FOV ring", C.ring, function(v) C.ring = v end)
+    mkToggle(Body, "Show lock box", C.lockbox, function(v) C.lockbox = v end)
+
+    local PART_ORDER = { "Head", "Hitbox", "Torso", "UpperTorso", "HumanoidRootPart", "Any" }
+    local partBtn
+    partBtn = mkButton(Body, "Target part: " .. C.hitPart, function()
+        local idx = 1
+        for i, v in ipairs(PART_ORDER) do if v == C.hitPart then idx = i end end
+        C.hitPart = PART_ORDER[(idx % #PART_ORDER) + 1]
+        partBtn.Text = "Target part: " .. C.hitPart
+    end)
 
     section("SHOT PATHS")
     mkToggle(Body, "Remote args (silent)", C.pNet, function(v) C.pNet = v end)
     mkToggle(Body, "Touch ray", C.pRay, function(v) C.pRay = v end)
     mkToggle(Body, "Mouse location", C.pLoc, function(v) C.pLoc = v end)
     mkToggle(Body, "GameUIMod.GetMousePos", C.pMouse, function(v) C.pMouse = v end)
+    mkToggle(Body, "Mouse.Hit / Target / UnitRay", C.pHit, function(v) C.pHit = v end)
     mkButton(Body, "Dump shot log to console", dumpLog)
 
     section("ESP")
@@ -1143,6 +1525,7 @@ local __hs_ok, __hs_err = pcall(function()
         if tracerPart then pcall(function() tracerPart:Destroy() end) end
         pcall(function() Gui:Destroy() end)
         _G.__hs = nil
+        pcall(function() if getgenv then getgenv().__hs = nil end end)
     end
 
     _G.__hs = {
@@ -1153,11 +1536,12 @@ local __hs_ok, __hs_err = pcall(function()
         end,
         dump = dumpLog,
         log = dumpLog,
+        origin = fovOrigin,
     }
     if getgenv then pcall(function() getgenv().__hs = _G.__hs end) end
 
     task.spawn(function() pcall(installAll) end)
-    syncRing()
+    overlay()
     print("[hs] ready")
 end)
 
