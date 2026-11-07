@@ -48,8 +48,9 @@ local Config = {
     aimFov        = 150,        -- pixels, radius from viewport centre
     aimSmooth     = 16,         -- higher = snappier (camera mode only)
     aimMaxDist    = 700,
-    aimTeamCheck  = true,
-    aimWallCheck  = true,
+    aimTeamCheck  = false,      -- SameTeam() decides when the game exposes it
+    aimWallCheck  = false,      -- ray from the camera, viewmodel excluded
+    silentStrict  = false,      -- true = only retarget callers whose source has "Auto"
     aimMobs       = true,
     aimPlayers    = true,
 
@@ -523,6 +524,36 @@ local function myTeamRaw()
     return nil
 end
 
+-- Authoritative team test when the game exposes it; attribute compare otherwise.
+-- GlobalStuff.SameTeam is the exact call Hypershot's own scripts use, so it
+-- matches the game's notion of hostility including the -1 (FFA) case.
+local GlbStf = nil
+do
+    local rs = game:GetService("ReplicatedStorage")
+    local mods = rs:FindFirstChild("Modules")
+    local gs = mods and mods:FindFirstChild("GlobalStuff")
+    if gs and gs:IsA("ModuleScript") then
+        local ok, res = pcall(require, gs)
+        if ok and type(res) == "table" then GlbStf = res end
+    end
+end
+
+local function sameTeamOf(model, plr, team, mine)
+    if GlbStf and type(GlbStf.SameTeam) == "function" then
+        local ok, r = pcall(GlbStf.SameTeam, GlbStf, LP, model)
+        if ok and typeof(r) == "boolean" then return r end
+        if plr then
+            ok, r = pcall(GlbStf.SameTeam, GlbStf, LP, plr)
+            if ok and typeof(r) == "boolean" then return r end
+        end
+    end
+    if typeof(mine) == "number" and typeof(team) == "number" then
+        if mine == -1 or team == -1 then return false end
+        return team == mine
+    end
+    return false
+end
+
 local function healthOf(model)
     -- Hypershot mobs carry their own health attributes; a Humanoid is only a
     -- fallback and is never required for the entity to be considered valid.
@@ -605,10 +636,7 @@ local function describe(model, kind, plr, mine)
         if ok then team = t end
     end
 
-    local sameTeam = false
-    if team ~= nil and mine ~= nil and team == mine then
-        sameTeam = not (typeof(mine) == "number" and mine == -1)
-    end
+    local sameTeam = sameTeamOf(model, plr, team, mine)
 
     return {
         model     = model,
@@ -962,13 +990,16 @@ end
 
 --=====================================================================
 -- Silent aim hook (Hypershot's own input path)
---   GameUI.GameUIMod.GetMousePos is what the weapon reads for its
---   shot direction. Overriding it retargets the shot without moving
---   the camera, which is the whole silent-aim pattern for this game.
+--   GameUI.GameUIMod.GetMousePos is what the weapon reads for its shot
+--   direction, and the game expects a WORLD position back (Vector3), not a
+--   screen position. Returning Vector2 makes the weapon fire at nothing.
+--   Only shot-path callers get retargeted; everything else (crosshair UI,
+--   menu code) falls through to the real function untouched.
 --=====================================================================
 local Silent = {
     module = nil,
-    original = nil,
+    original = nil,   -- callable that runs the game's real GetMousePos
+    hook = nil,
     target = nil,
     installed = false,
     status = "off",
@@ -978,13 +1009,51 @@ local function findGameUiModule()
     local pg = LP:FindFirstChild("PlayerGui")
     if not pg then return nil end
     local gui = pg:FindFirstChild("GameUI")
-    if not gui then return nil end
-    local mod = gui:FindFirstChild("GameUIMod")
-    if mod and mod:IsA("ModuleScript") then return mod end
+    if gui then
+        local mod = gui:FindFirstChild("GameUIMod")
+        if mod and mod:IsA("ModuleScript") then return mod end
+    end
+    for _, d in ipairs(pg:GetDescendants()) do
+        if d:IsA("ModuleScript") and d.Name == "GameUIMod" then return d end
+    end
     return nil
 end
 
+local SHOT_CALLERS = { "Auto", "Fire", "Shoot", "Weapon" }
+
+local function callerIsShot()
+    local info = debug.info or debug.getinfo
+    if type(info) ~= "function" then return true end
+    for level = 2, 6 do
+        local ok, src = pcall(info, level, "s")
+        if not ok or type(src) ~= "string" or src == "" then break end
+        if Config.silentStrict then
+            if src:find("Auto") then return true end
+        else
+            for _, pat in ipairs(SHOT_CALLERS) do
+                if src:find(pat) then return true end
+            end
+        end
+    end
+    return false
+end
+
+local function silentHook(self, ...)
+    if Config.aimEnabled and Config.aimMode == "silent" then
+        local t = Silent.target
+        local part = t and t.aimPart
+        if part and part.Parent and callerIsShot() then
+            return part.Position
+        end
+    end
+    return Silent.original(self, ...)
+end
+
 local function installSilent()
+    if Silent.installed and Silent.original then
+        Silent.status = "hooked"
+        return true
+    end
     local mod = findGameUiModule()
     if not mod then
         Silent.status = "no GameUIMod"
@@ -995,42 +1064,52 @@ local function installSilent()
         Silent.status = "require failed"
         return false
     end
-    if type(tbl.GetMousePos) ~= "function" then
+    local orig = tbl.GetMousePos
+    if type(orig) ~= "function" then
         Silent.status = "no GetMousePos"
         return false
     end
-    if Silent.module == tbl and Silent.installed then
-        Silent.status = "hooked"
-        return true
-    end
-
-    Silent.original = tbl.GetMousePos
-    tbl.GetMousePos = function(self, ...)
-        local t = Silent.target
-        if t and t.aimPart and t.aimPart.Parent then
-            local cam = Workspace.CurrentCamera
-            if cam then
-                local pos, onScreen = cam:WorldToViewportPoint(t.aimPart.Position)
-                if onScreen then
-                    return Vector2.new(pos.X, pos.Y)
-                end
-            end
-        end
-        return Silent.original(self, ...)
-    end
 
     Silent.module = tbl
+
+    -- Preferred: detour the function itself, so callers that cached the
+    -- reference at require time are still covered.
+    if type(hookfunction) == "function" then
+        local okh, ret = pcall(hookfunction, orig, silentHook)
+        if okh and type(ret) == "function" then
+            Silent.original = ret
+            Silent.hook = silentHook
+            Silent.installed = true
+            Silent.status = "hooked fn"
+            return true
+        end
+    end
+
+    Silent.original = orig
+    local okw = pcall(function() tbl.GetMousePos = silentHook end)
+    if not okw then
+        Silent.original = nil
+        Silent.status = "table locked"
+        return false
+    end
+    Silent.hook = silentHook
     Silent.installed = true
-    Silent.status = "hooked"
+    Silent.status = "hooked tbl"
     return true
 end
 
 local function uninstallSilent()
-    if Silent.module and Silent.original then
-        pcall(function() Silent.module.GetMousePos = Silent.original end)
+    if Silent.installed and Silent.hook then
+        if type(restorefunction) == "function" then
+            pcall(restorefunction, Silent.hook)
+        end
+        if Silent.module and Silent.module.GetMousePos == Silent.hook and Silent.original then
+            pcall(function() Silent.module.GetMousePos = Silent.original end)
+        end
     end
     Silent.module = nil
     Silent.original = nil
+    Silent.hook = nil
     Silent.installed = false
     Silent.target = nil
     Silent.status = "off"
@@ -1042,7 +1121,9 @@ end
 local function canSee(t)
     local cam = Workspace.CurrentCamera
     if not cam then return false end
-    local filter = {}
+    -- The camera carries the first-person viewmodel; a ray from the camera
+    -- origin starts inside it and would report every target as blocked.
+    local filter = { cam }
     if LP.Character then filter[#filter + 1] = LP.Character end
     if tracerOrigin then filter[#filter + 1] = tracerOrigin end
 
@@ -1050,6 +1131,7 @@ local function canSee(t)
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = filter
     params.IgnoreWater = true
+    params.RespectCanCollide = true
 
     local origin = cam.CFrame.Position
     local hit = Workspace:Raycast(origin, t.aimPart.Position - origin, params)
@@ -1079,9 +1161,12 @@ local function pickTarget(list, cam)
     return best
 end
 
+local Aim = { current = nil }
+
 local function runAimbot(list, dt)
     if not Config.aimEnabled then
         Silent.target = nil
+        Aim.current = nil
         return
     end
     local cam = Workspace.CurrentCamera
@@ -1090,19 +1175,34 @@ local function runAimbot(list, dt)
     local target = pickTarget(list, cam)
     if Config.aimMode == "silent" then
         Silent.target = target
-        if target and not Silent.installed then
+        Aim.current = nil
+        if not Silent.installed then
             installSilent()
         end
         return
     end
 
     Silent.target = nil
-    if not target then return end
+    Aim.current = target
+end
 
-    local goal = CFrame.lookAt(cam.CFrame.Position, target.aimPart.Position)
+-- Camera write lives on its own render step at Camera priority + 1, so the
+-- game's camera controller (priority 200) runs first and cannot overwrite it.
+local AIM_BIND = "hs_camera_aim"
+
+local function applyCameraAim(dt)
+    if not Config.aimEnabled or Config.aimMode ~= "camera" then return end
+    local t = Aim.current
+    if not t or not t.aimPart or not t.aimPart.Parent then return end
+    local cam = Workspace.CurrentCamera
+    if not cam then return end
+
+    local goal = CFrame.lookAt(cam.CFrame.Position, t.aimPart.Position)
     local a = math.clamp(1 - math.exp(-Config.aimSmooth * dt), 0, 1)
     cam.CFrame = cam.CFrame:Lerp(goal, a)
 end
+
+RunService:BindToRenderStep(AIM_BIND, Enum.RenderPriority.Camera.Value + 1, applyCameraAim)
 
 --=====================================================================
 -- Menu contents
@@ -1126,6 +1226,9 @@ makeToggle(aimList, "Silent aim (GameUIMod hook)", Config.aimMode == "silent", f
     else
         uninstallSilent()
     end
+end)
+makeToggle(aimList, "Silent: strict caller (Auto only)", Config.silentStrict, function(v)
+    Config.silentStrict = v
 end)
 makeSlider(aimList, "Aim FOV", 40, 600, Config.aimFov, nil, function(v)
     Config.aimFov = v
@@ -1198,8 +1301,9 @@ bind(RunService.RenderStepped, function(dt)
         if Config.aimEnabled and Config.aimMode == "silent" and not Silent.installed then
             installSilent()
         end
-        Status.Text = string.format("targets %d | silent %s", #list, Silent.status)
-        Status.TextColor3 = Silent.installed and Theme.ok or Theme.dim
+        Status.Text = string.format("targets %d | aim %s | silent %s",
+            #list, Config.aimMode, Silent.status)
+        Status.TextColor3 = (Config.aimEnabled or Silent.installed) and Theme.ok or Theme.dim
     end
 end)
 
@@ -1218,8 +1322,9 @@ end)
 bind(LP.CharacterAdded, function()
     deepCache = {}
     deepNext = 0
-    if Config.aimMode == "silent" and Config.aimEnabled then
-        Silent.installed = false
+    -- The GameUIMod hook survives respawns; re-installing would stack detours.
+    if Config.aimMode == "silent" and Config.aimEnabled and not Silent.installed then
+        installSilent()
     end
 end)
 
@@ -1247,6 +1352,9 @@ local function unload()
         pcall(function() c:Disconnect() end)
     end
     connections = {}
+
+    pcall(function() RunService:UnbindFromRenderStep(AIM_BIND) end)
+    Aim.current = nil
 
     uninstallSilent()
 
