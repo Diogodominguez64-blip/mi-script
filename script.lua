@@ -50,7 +50,7 @@ local Config = {
     aimMaxDist    = 700,
     aimTeamCheck  = false,      -- SameTeam() decides when the game exposes it
     aimWallCheck  = false,      -- ray from the camera, viewmodel excluded
-    silentStrict  = false,      -- true = only retarget callers whose source has "Auto"
+    aimAssist     = true,       -- retarget the shot in camera mode too
     aimMobs       = true,
     aimPlayers    = true,
 
@@ -1003,6 +1003,19 @@ local Silent = {
     target = nil,
     installed = false,
     status = "off",
+    calls = 0,
+    hits = 0,
+    lastType = "-",
+    lastSrc = "-",
+    armedAt = 0,
+}
+
+local Loc = {
+    original = nil,
+    hook = nil,
+    installed = false,
+    calls = 0,
+    hits = 0,
 }
 
 local function findGameUiModule()
@@ -1019,34 +1032,98 @@ local function findGameUiModule()
     return nil
 end
 
-local SHOT_CALLERS = { "Auto", "Fire", "Shoot", "Weapon" }
+-- Shots in Hypershot come from the module's mouse position, not from the
+-- camera, which is why a camera-only aimbot tracks but never hits. The hook
+-- calls the real function once, looks at what it actually returns, and only
+-- substitutes when the contract is usable:
+--   Vector3  -> the caller wants a world point, hand it the head
+--   Vector2  -> the caller wants a screen point, hand it the head's projection
+-- No caller-name guessing, so a renamed weapon module cannot silently disable it.
+local function shotsArmed()
+    if not Config.aimEnabled then return false end
+    if Config.aimMode == "silent" then return true end
+    return Config.aimAssist
+end
 
-local function callerIsShot()
-    local info = debug.info or debug.getinfo
-    if type(info) ~= "function" then return true end
-    for level = 2, 6 do
-        local ok, src = pcall(info, level, "s")
-        if not ok or type(src) ~= "string" or src == "" then break end
-        if Config.silentStrict then
-            if src:find("Auto") then return true end
-        else
-            for _, pat in ipairs(SHOT_CALLERS) do
-                if src:find(pat) then return true end
-            end
-        end
+local function currentPart()
+    local t = Silent.target
+    local p = t and t.aimPart
+    if p and p.Parent then return p end
+    return nil
+end
+
+local function retarget(a, b, c)
+    local part = currentPart()
+    if not part then return nil end
+    local kind = typeof(a)
+
+    if kind == "Vector3" then
+        return part.Position, b, c
+    elseif kind == "Vector2" then
+        local cam = Workspace.CurrentCamera
+        if not cam then return nil end
+        local sp, on = cam:WorldToViewportPoint(part.Position)
+        if not on then return nil end
+        return Vector2.new(sp.X, sp.Y), b, c
     end
-    return false
+    return nil
 end
 
 local function silentHook(self, ...)
-    if Config.aimEnabled and Config.aimMode == "silent" then
-        local t = Silent.target
-        local part = t and t.aimPart
-        if part and part.Parent and callerIsShot() then
-            return part.Position
+    Silent.calls = Silent.calls + 1
+    local a, b, c = Silent.original(self, ...)
+
+    if type(a) == "Vector3" or type(a) == "Vector2" then
+        Silent.lastType = typeof(a)
+    end
+    local info = debug.info or debug.getinfo
+    if type(info) == "function" then
+        local ok, src = pcall(info, 2, "s")
+        if ok and type(src) == "string" and src ~= "" then
+            Silent.lastSrc = src:sub(-48)
         end
     end
-    return Silent.original(self, ...)
+
+    if shotsArmed() then
+        local ra, rb, rc = retarget(a, b, c)
+        if ra then
+            Silent.hits = Silent.hits + 1
+            return ra, rb, rc
+        end
+    end
+    if Silent.calls == 1 then
+        print(string.format("[hs_menu] GetMousePos first call | src=%s | returns=%s",
+            tostring(Silent.lastSrc), tostring(Silent.lastType)))
+    end
+    return a, b, c
+end
+
+local function locationHook(self, ...)
+    Loc.calls = Loc.calls + 1
+    local a, b, c = Loc.original(self, ...)
+    if shotsArmed() then
+        local ra, rb, rc = retarget(a, b, c)
+        if ra then
+            Loc.hits = Loc.hits + 1
+            return ra, rb, rc
+        end
+    end
+    return a, b, c
+end
+
+-- Fallback path: only installed if GetMousePos never gets called while shots
+-- are armed, which means this build reads the pointer through UIS instead.
+local function installLocationHook()
+    if Loc.installed then return true end
+    if type(hookfunction) ~= "function" then return false end
+    local ok, orig = pcall(function() return UserInputService.GetMouseLocation end)
+    if not ok or type(orig) ~= "function" then return false end
+    local okh, ret = pcall(hookfunction, orig, locationHook)
+    if not okh or type(ret) ~= "function" then return false end
+    Loc.original = ret
+    Loc.hook = locationHook
+    Loc.installed = true
+    return true
 end
 
 local function installSilent()
@@ -1106,6 +1183,14 @@ local function uninstallSilent()
         if Silent.module and Silent.module.GetMousePos == Silent.hook and Silent.original then
             pcall(function() Silent.module.GetMousePos = Silent.original end)
         end
+    end
+    if Loc.installed and Loc.hook then
+        if type(restorefunction) == "function" then
+            pcall(restorefunction, Loc.hook)
+        end
+        Loc.original = nil
+        Loc.hook = nil
+        Loc.installed = false
     end
     Silent.module = nil
     Silent.original = nil
@@ -1173,8 +1258,11 @@ local function runAimbot(list, dt)
     if not cam then return end
 
     local target = pickTarget(list, cam)
+    -- Both modes feed the shot retarget: camera mode moves the view AND the
+    -- shot, silent mode moves only the shot.
+    Silent.target = target
+
     if Config.aimMode == "silent" then
-        Silent.target = target
         Aim.current = nil
         if not Silent.installed then
             installSilent()
@@ -1182,7 +1270,6 @@ local function runAimbot(list, dt)
         return
     end
 
-    Silent.target = nil
     Aim.current = target
 end
 
@@ -1227,8 +1314,8 @@ makeToggle(aimList, "Silent aim (GameUIMod hook)", Config.aimMode == "silent", f
         uninstallSilent()
     end
 end)
-makeToggle(aimList, "Silent: strict caller (Auto only)", Config.silentStrict, function(v)
-    Config.silentStrict = v
+makeToggle(aimList, "Retarget shots (also in camera mode)", Config.aimAssist, function(v)
+    Config.aimAssist = v
 end)
 makeSlider(aimList, "Aim FOV", 40, 600, Config.aimFov, nil, function(v)
     Config.aimFov = v
@@ -1298,11 +1385,22 @@ bind(RunService.RenderStepped, function(dt)
     statusClock = statusClock + dt
     if statusClock >= 0.5 then
         statusClock = 0
-        if Config.aimEnabled and Config.aimMode == "silent" and not Silent.installed then
+        if Config.aimEnabled and not Silent.installed then
             installSilent()
         end
-        Status.Text = string.format("targets %d | aim %s | silent %s",
-            #list, Config.aimMode, Silent.status)
+        -- GetMousePos never called while armed -> this build reads the pointer
+        -- elsewhere. Give it four seconds of armed time, then try UIS.
+        if shotsArmed() and Silent.target and not Loc.installed then
+            if Silent.armedAt == 0 then Silent.armedAt = os.clock() end
+            if Silent.calls == 0 and os.clock() - Silent.armedAt > 4 then
+                installLocationHook()
+            end
+        else
+            Silent.armedAt = 0
+        end
+        Status.Text = string.format(
+            "tgt %d | mp %d/%d | loc %d/%d | %s",
+            #list, Silent.hits, Silent.calls, Loc.hits, Loc.calls, Silent.status)
         Status.TextColor3 = (Config.aimEnabled or Silent.installed) and Theme.ok or Theme.dim
     end
 end)
@@ -1344,6 +1442,10 @@ end
 
 syncFov()
 
+-- Install the shot hook up front so the status counters report immediately;
+-- it falls through to the real function while shots are not armed.
+installSilent()
+
 --=====================================================================
 -- Unload
 --=====================================================================
@@ -1373,4 +1475,4 @@ local function unload()
     _G.__hs_menu = nil
 end
 
-_G.__hs_menu = { unload = unload, config = Config }
+_G.__hs_menu = { unload = unload, config = Config 
